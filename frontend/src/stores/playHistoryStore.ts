@@ -143,11 +143,10 @@ export const usePlayHistoryStore = defineStore('playHistory', () => {
     currentSession.value.lastUpdateTime = now
     currentSession.value.accumulatedTime += delta
 
-    // 每次都更新总时长（直接覆盖，确保准确）
+    // 只在内存中更新，不保存到 DB
     const record = playRecords.value.get(currentSession.value.videoId)
     if (record) {
       record.totalPlayTime = initialTotalTime + Math.floor(currentSession.value.accumulatedTime)
-      saveToDB(record)
     }
   }
 
@@ -209,6 +208,57 @@ export const usePlayHistoryStore = defineStore('playHistory', () => {
         totalPlayTime: 0,
         lastPlayedAt: Date.now(),
         rating,
+      }
+      playRecords.value.set(videoId, newRecord)
+      saveToDB(newRecord)
+    }
+  }
+
+  // 获取视频时长
+  function getVideoDuration(videoId: string): number | undefined {
+    return playRecords.value.get(videoId)?.videoDuration
+  }
+
+  // 保存视频时长
+  function setVideoDuration(videoId: string, duration: number) {
+    const existing = playRecords.value.get(videoId)
+    if (existing) {
+      // 只在没有保存过时才保存，或者时长有显著变化时更新
+      if (!existing.videoDuration || Math.abs(existing.videoDuration - duration) > 1) {
+        existing.videoDuration = duration
+        saveToDB(existing)
+      }
+    } else {
+      const newRecord: VideoPlayRecord = {
+        videoId,
+        playCount: 0,
+        totalPlayTime: 0,
+        lastPlayedAt: Date.now(),
+        videoDuration: duration,
+      }
+      playRecords.value.set(videoId, newRecord)
+      saveToDB(newRecord)
+    }
+  }
+
+  // 获取质量标记
+  function getIsBadQuality(videoId: string): boolean {
+    return playRecords.value.get(videoId)?.isBadQuality || false
+  }
+
+  // 设置质量标记
+  function setIsBadQuality(videoId: string, isBad: boolean) {
+    const existing = playRecords.value.get(videoId)
+    if (existing) {
+      existing.isBadQuality = isBad
+      saveToDB(existing)
+    } else {
+      const newRecord: VideoPlayRecord = {
+        videoId,
+        playCount: 0,
+        totalPlayTime: 0,
+        lastPlayedAt: Date.now(),
+        isBadQuality: isBad,
       }
       playRecords.value.set(videoId, newRecord)
       saveToDB(newRecord)
@@ -317,5 +367,9 @@ export const usePlayHistoryStore = defineStore('playHistory', () => {
     clearRecord,
     clearAllRecords,
     resetPlayCountMarker,
+    getVideoDuration,
+    setVideoDuration,
+    getIsBadQuality,
+    setIsBadQuality,
   }
 })

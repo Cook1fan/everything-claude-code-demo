@@ -123,8 +123,8 @@ export async function migrateFromLocalStorage(): Promise<number> {
 
     console.log(`数据迁移完成：${migratedCount}/${recordArray.length} 条记录`)
 
-    // 保留 localStorage 数据作为备份，不删除
-    // localStorage.removeItem(LEGACY_STORAGE_KEY)
+    // 迁移成功后删除 localStorage 中的旧数据，避免重复迁移
+    localStorage.removeItem(LEGACY_STORAGE_KEY)
 
     return migratedCount
   } catch (err) {
@@ -226,14 +226,22 @@ export async function getAppState(): Promise<AppState> {
  */
 export async function putAppState(state: Partial<AppState>): Promise<void> {
   await ensureDB()
-  const store = getStore(APP_STATE_STORE, 'readwrite')
-  const currentState = await getAppState()
+
+  // 在同一个事务中完成读取和写入
+  const transaction = db!.transaction([APP_STATE_STORE], 'readwrite')
+  const store = transaction.objectStore(APP_STATE_STORE)
+
+  // 先读取当前状态
+  const currentState = await wrapRequest(store.get('global')) || { ...DEFAULT_APP_STATE }
+
+  // 合并状态
   const newState: AppState = {
     ...currentState,
     ...state,
     id: 'global',
     updatedAt: Date.now(),
   }
+
   const clonedState = cloneForStorage(newState)
   await wrapRequest(store.put(clonedState))
 }

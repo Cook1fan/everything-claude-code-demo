@@ -67,6 +67,13 @@
                 {{ isPlaying ? '⏸️ 暂停' : '▶️ 播放' }}
               </button>
               <button
+                @click="forward15"
+                class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors font-medium"
+                title="前进15秒"
+              >
+                ⏩ +15秒
+              </button>
+              <button
                 @click="forward30"
                 class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors font-medium"
                 title="前进30秒"
@@ -132,6 +139,20 @@
                 </div>
               </div>
 
+              <!-- 质量标记 -->
+              <div class="mb-4">
+                <label class="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    v-model="isBadQuality"
+                    class="w-4 h-4 rounded border-slate-600 bg-slate-700 text-red-500 focus:ring-red-500 focus:ring-offset-slate-800"
+                  />
+                  <span class="text-slate-300 text-sm">
+                    🚫 质量不好
+                  </span>
+                </label>
+              </div>
+
               <!-- 播放统计 -->
               <div v-if="playCount > 0" class="mb-4 p-3 bg-slate-700/50 rounded-lg">
                 <div class="flex items-center justify-between text-sm">
@@ -150,10 +171,6 @@
                   <span class="text-slate-500 w-14 shrink-0">目录:</span>
                   <span class="text-slate-300 break-all">{{ video.directory }}</span>
                 </div>
-                <div class="flex items-center gap-2">
-                  <span class="text-slate-500 w-14 shrink-0">硬盘:</span>
-                  <span class="text-slate-300 font-medium">{{ video.hardDrive }}</span>
-                </div>
                 <div v-if="video.fileSize" class="flex items-center gap-2">
                   <span class="text-slate-500 w-14 shrink-0">大小:</span>
                   <span class="text-slate-300 font-medium">{{ store.formatFileSize(video.fileSize) }}</span>
@@ -161,10 +178,6 @@
                 <div class="flex items-center gap-2">
                   <span class="text-slate-500 w-14 shrink-0">格式:</span>
                   <span class="text-slate-300 font-medium uppercase">{{ video.videoExtension.slice(1) }}</span>
-                </div>
-                <div v-if="video.createdAt" class="flex items-center gap-2">
-                  <span class="text-slate-500 w-14 shrink-0">时间:</span>
-                  <span class="text-slate-300">{{ formatDate(video.createdAt) }}</span>
                 </div>
               </div>
             </div>
@@ -262,6 +275,12 @@ function rewind10() {
   }
 }
 
+function forward15() {
+  if (player) {
+    player.forward(15)
+  }
+}
+
 function forward30() {
   if (player) {
     player.forward(30)
@@ -288,43 +307,73 @@ const rating = computed({
   },
 })
 
+const isBadQuality = computed({
+  get: () => video.value ? playHistory.getIsBadQuality(video.value.id) : false,
+  set: (value: boolean) => {
+    if (video.value) {
+      playHistory.setIsBadQuality(video.value.id, value)
+    }
+  },
+})
+
 const timestamps = computed(() => video.value ? playHistory.getTimestamps(video.value.id) : [])
 
 function markTimestamp() {
-  if (!player || !video.value || !videoRef.value) return
+  if (!player || !video.value) return
   const currentTime = player.currentTime
+
+  // 从 Plyr 实例获取真实的视频元素
+  const realVideoElement = player.elements.container?.querySelector('video') || videoRef.value
+  if (!realVideoElement) return
 
   // 截取当前画面
   const canvas = document.createElement('canvas')
-  canvas.width = videoRef.value.videoWidth
-  canvas.height = videoRef.value.videoHeight
+  const width = realVideoElement.videoWidth || 1280
+  const height = realVideoElement.videoHeight || 720
+  canvas.width = width
+  canvas.height = height
 
   let screenshot: string | undefined
   const ctx = canvas.getContext('2d')
   if (ctx) {
-    ctx.drawImage(videoRef.value, 0, 0, canvas.width, canvas.height)
-    screenshot = canvas.toDataURL('image/jpeg', 0.8)
+    try {
+      ctx.drawImage(realVideoElement, 0, 0, width, height)
+      screenshot = canvas.toDataURL('image/jpeg', 0.8)
+    } catch (e) {
+      console.error('截图失败:', e)
+    }
   }
 
   playHistory.addTimestamp(video.value.id, currentTime, undefined, screenshot)
 }
 
 function takeScreenshot() {
-  if (!videoRef.value || !video.value) return
+  if (!player || !video.value) return
+
+  // 从 Plyr 实例获取真实的视频元素
+  const realVideoElement = player.elements.container?.querySelector('video') || videoRef.value
+  if (!realVideoElement) return
 
   const canvas = document.createElement('canvas')
-  canvas.width = videoRef.value.videoWidth
-  canvas.height = videoRef.value.videoHeight
+  const width = realVideoElement.videoWidth || 1280
+  const height = realVideoElement.videoHeight || 720
+  canvas.width = width
+  canvas.height = height
 
   const ctx = canvas.getContext('2d')
   if (ctx) {
-    ctx.drawImage(videoRef.value, 0, 0, canvas.width, canvas.height)
+    try {
+      ctx.drawImage(realVideoElement, 0, 0, width, height)
 
-    // 下载截图
-    const link = document.createElement('a')
-    link.download = `${video.value.title}_screenshot_${Date.now()}.png`
-    link.href = canvas.toDataURL('image/png')
-    link.click()
+      // 下载截图
+      const link = document.createElement('a')
+      link.download = `${video.value.title}_screenshot_${Date.now()}.png`
+      link.href = canvas.toDataURL('image/png')
+      link.click()
+    } catch (e) {
+      console.error('截图失败:', e)
+      alert('截图失败，请重试')
+    }
   }
 }
 
@@ -488,6 +537,26 @@ function loadPlayer() {
     player.on('error', (event) => {
       console.error('Plyr 播放错误:', event)
       playError.value = '视频播放失败，请检查视频格式'
+    })
+
+    // 监听视频元数据加载完成，保存视频时长
+    player.on('loadedmetadata', () => {
+      if (video.value && player) {
+        const duration = player.duration
+        if (duration && duration > 0) {
+          playHistory.setVideoDuration(video.value.id, duration)
+        }
+      }
+    })
+
+    // 监听播放器 ready 事件，也尝试获取时长
+    player.on('ready', () => {
+      if (video.value && player) {
+        const duration = player.duration
+        if (duration && duration > 0) {
+          playHistory.setVideoDuration(video.value.id, duration)
+        }
+      }
     })
   }
 }

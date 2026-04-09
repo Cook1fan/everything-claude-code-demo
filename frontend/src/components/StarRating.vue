@@ -4,10 +4,13 @@
       v-for="star in 10"
       :key="star"
       @click="setRating(star)"
-      @mouseenter="hoverRating = star"
-      @mouseleave="hoverRating = 0"
-      class="text-xl transition-transform hover:scale-125"
-      :class="star <= displayRating ? 'text-yellow-400' : 'text-slate-600'"
+      @mouseenter="handleMouseEnter(star)"
+      @mouseleave="handleMouseLeave"
+      class="text-xl transition-transform"
+      :class="[
+        star <= displayRating ? 'text-yellow-400' : 'text-slate-600',
+        !readonly ? 'hover:scale-125 cursor-pointer' : 'cursor-default'
+      ]"
     >
       ★
     </button>
@@ -33,11 +36,22 @@ const emit = defineEmits<{
 const hoverRating = ref(0)
 
 const displayRating = computed(() => {
+  if (props.readonly) return props.modelValue
   return hoverRating.value || props.modelValue
 })
 
 function setRating(rating: number) {
   if (props.readonly) return
   emit('update:modelValue', rating)
+}
+
+function handleMouseEnter(rating: number) {
+  if (props.readonly) return
+  hoverRating.value = rating
+}
+
+function handleMouseLeave() {
+  if (props.readonly) return
+  hoverRating.value = 0
 }
 </script>

@@ -81,7 +81,13 @@
         <!-- 面包屑导航和控制栏 -->
         <div class="flex items-center justify-between mb-4">
           <div class="flex items-center gap-2">
-            <div v-if="store.selectedDirectory" class="flex items-center gap-2 text-sm">
+            <div v-if="store.searchQuery" class="text-slate-300 text-sm">
+              搜索 "<span class="text-white font-medium">{{ store.searchQuery }}</span>"
+              <span class="text-slate-400 ml-2">
+                ({{ store.filteredVideos.length }} 个结果)
+              </span>
+            </div>
+            <div v-else-if="store.selectedDirectory" class="flex items-center gap-2 text-sm">
               <button
                 @click="store.selectedDirectory = ''"
                 class="text-blue-400 hover:text-blue-300"
@@ -90,9 +96,15 @@
               </button>
               <span class="text-slate-600">/</span>
               <span class="text-slate-300">{{ getDirectoryName(store.selectedDirectory) }}</span>
+              <span class="text-slate-400">
+                ({{ store.filteredVideos.length }} 个视频)
+              </span>
             </div>
             <div v-else class="text-slate-400 text-sm">
               全部视频
+              <span class="text-slate-300 ml-1">
+                ({{ store.filteredVideos.length }} 个视频)
+              </span>
             </div>
           </div>
 
@@ -171,7 +183,7 @@
           <!-- 视频网格 -->
           <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
             <VideoCard
-              v-for="video in store.pagedVideos"
+              v-for="video in prioritizedPagedVideos"
               :key="video.id"
               :video="video"
               @click="playVideo(video)"
@@ -226,15 +238,60 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, watch, ref } from 'vue'
+import { onMounted, watch, ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useVideoStore } from '@/stores/videoStore'
+import { usePlayHistoryStore } from '@/stores/playHistoryStore'
 import VideoCard from '@/components/VideoCard.vue'
 import DirectoryTree from '@/components/DirectoryTree.vue'
 
 const store = useVideoStore()
+const playHistory = usePlayHistoryStore()
 const router = useRouter()
 const mainContentRef = ref<HTMLElement | null>(null)
+
+// 洗牌算法
+function shuffleArray<T>(array: T[], seed: number): T[] {
+  const result = [...array]
+  let s = seed
+  for (let i = result.length - 1; i > 0; i--) {
+    s = (s * 1103515245 + 12345) & 0x7fffffff
+    const j = s % (i + 1)
+    ;[result[i], result[j]] = [result[j], result[i]]
+  }
+  return result
+}
+
+// 优先显示未播放视频的分页列表
+const prioritizedPagedVideos = computed(() => {
+  const allVideos = store.filteredVideos
+
+  // 如果不是随机排序，直接返回原分页
+  if (store.sortMode !== 'random') {
+    return store.pagedVideos
+  }
+
+  // 将视频分为未播放和已播放两组
+  const unplayed: typeof allVideos = []
+  const played: typeof allVideos = []
+  for (const video of allVideos) {
+    if (playHistory.getPlayCount(video.id) === 0) {
+      unplayed.push(video)
+    } else {
+      played.push(video)
+    }
+  }
+
+  // 分别洗牌，未播放的放在前面
+  const shuffledUnplayed = shuffleArray(unplayed, store.randomSeed)
+  const shuffledPlayed = shuffleArray(played, store.randomSeed + 1)
+  const prioritized = [...shuffledUnplayed, ...shuffledPlayed]
+
+  // 分页
+  const start = (store.currentPage - 1) * store.pageSize
+  const end = start + store.pageSize
+  return prioritized.slice(start, end)
+})
 
 // 当搜索或目录变化时，回到第一页
 watch([() => store.searchQuery, () => store.selectedDirectory], () => {

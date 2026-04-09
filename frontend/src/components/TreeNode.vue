@@ -29,7 +29,7 @@
 
     <div v-if="node.children.length > 0 && isExpanded" class="children">
       <TreeNode
-        v-for="child in node.children"
+        v-for="child in sortedChildren"
         :key="child.path"
         :node="child"
         :selected-path="selectedPath"
@@ -57,6 +57,16 @@ const emit = defineEmits<{
 }>()
 
 const isExpanded = computed(() => props.expandedPaths.has(props.node.path))
+
+// 子节点按视频数降序排序，视频数相同则按名称排序
+const sortedChildren = computed(() => {
+  return [...props.node.children].sort((a, b) => {
+    if (b.videoCount !== a.videoCount) {
+      return b.videoCount - a.videoCount
+    }
+    return a.name.localeCompare(b.name)
+  })
+})
 
 function handleToggle() {
   emit('toggle', props.node.path)

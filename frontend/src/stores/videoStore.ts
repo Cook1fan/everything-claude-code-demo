@@ -77,7 +77,8 @@ export const useVideoStore = defineStore('video', () => {
   }
 
   const filteredVideos = computed(() => {
-    let result = [...videos.value]
+    // 确保 videos.value 是数组
+    let result = Array.isArray(videos.value) ? [...videos.value] : []
 
     if (selectedDirectory.value) {
       result = result.filter(v => v.directory === selectedDirectory.value)
@@ -190,12 +191,17 @@ export const useVideoStore = defineStore('video', () => {
     try {
       const res = await fetch(`${API_BASE}/videos`)
       const data: VideoData = await res.json()
-      videos.value = data.videos
-      hardDrives.value = data.hardDrives
-      directories.value = data.directories
-      directoryTree.value = data.directoryTree || []
+      videos.value = Array.isArray(data.videos) ? data.videos : []
+      hardDrives.value = Array.isArray(data.hardDrives) ? data.hardDrives : []
+      directories.value = Array.isArray(data.directories) ? data.directories : []
+      directoryTree.value = Array.isArray(data.directoryTree) ? data.directoryTree : []
     } catch (err) {
       console.error('加载视频失败:', err)
+      // 出错时设置为空数组
+      videos.value = []
+      hardDrives.value = []
+      directories.value = []
+      directoryTree.value = []
     } finally {
       loading.value = false
     }
@@ -268,6 +274,7 @@ export const useVideoStore = defineStore('video', () => {
     recentVideos,
     expandedNodes,
     sortMode,
+    randomSeed,
     currentPage,
     pageSize,
     isInitialized,

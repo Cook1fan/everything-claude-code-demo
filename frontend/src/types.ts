@@ -51,6 +51,8 @@ export interface VideoPlayRecord {
   lastPlayedAt: number;
   rating?: number; // 1-10星评分
   timestamps?: VideoTimestamp[]; // 精彩时间点
+  videoDuration?: number; // 视频总时长（秒）
+  isBadQuality?: boolean; // 质量是否不好
 }
 
 export interface VideoPlaySession {

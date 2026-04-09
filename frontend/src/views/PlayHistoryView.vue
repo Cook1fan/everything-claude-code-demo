@@ -58,65 +58,35 @@
         <div
           v-for="record in sortedRecords"
           :key="record.videoId"
-          class="group cursor-pointer bg-slate-800 rounded-xl overflow-hidden hover:ring-2 hover:ring-blue-500 transition-all duration-200 relative"
+          class="relative"
         >
-          <!-- 海报区域 -->
-          <div
+          <VideoCard
             v-if="getVideo(record.videoId)"
+            :video="getVideo(record.videoId)!"
             @click="playVideo(getVideo(record.videoId)!)"
-            class="aspect-video bg-slate-700 relative overflow-hidden"
-          >
-            <!-- 海报图片 -->
-            <img
-              v-if="getVideo(record.videoId)?.posterPath"
-              :src="store.getImageUrl(getVideo(record.videoId)!)"
-              :alt="getVideo(record.videoId)?.title"
-              loading="lazy"
-              class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-            />
-            <div
-              v-else
-              class="w-full h-full flex items-center justify-center bg-gradient-to-br from-slate-700 to-slate-800"
-            >
-              <div class="text-5xl">🎬</div>
-            </div>
-
-            <!-- 播放按钮覆盖层 -->
-            <div class="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
-              <div class="w-14 h-14 bg-white/90 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity transform scale-90 group-hover:scale-100">
-                <div class="ml-1 text-slate-900 text-2xl">▶</div>
-              </div>
-            </div>
-          </div>
+          />
 
           <!-- 视频已删除提示 -->
           <div
             v-else
-            class="aspect-video bg-slate-700 flex items-center justify-center"
+            class="bg-slate-800 rounded-xl overflow-hidden"
           >
-            <div class="text-center">
-              <div class="text-4xl mb-2">❓</div>
-              <div class="text-slate-500 text-xs">视频已删除</div>
+            <div class="aspect-video bg-slate-700 flex items-center justify-center">
+              <div class="text-center">
+                <div class="text-4xl mb-2">❓</div>
+                <div class="text-slate-500 text-xs">视频已删除</div>
+              </div>
+            </div>
+            <div class="p-4">
+              <h3 class="font-semibold text-slate-500 truncate">
+                视频已删除
+              </h3>
             </div>
           </div>
 
-          <!-- 信息区域 -->
-          <div class="p-4">
-            <h3
-              v-if="getVideo(record.videoId)"
-              class="font-semibold text-white truncate"
-              :title="getVideo(record.videoId)?.title"
-            >
-              {{ getVideo(record.videoId)?.title }}
-            </h3>
-            <h3
-              v-else
-              class="font-semibold text-slate-500 truncate"
-            >
-              视频已删除
-            </h3>
-
-            <div class="mt-2 flex items-center justify-between text-xs text-slate-400">
+          <!-- 播放历史信息 -->
+          <div v-if="getVideo(record.videoId)" class="mt-2 px-1">
+            <div class="flex items-center justify-between text-xs text-slate-400">
               <span class="text-green-400">
                 ⏱️ {{ playHistory.formatPlayTime(record.totalPlayTime) }}
               </span>
@@ -124,8 +94,7 @@
                 ▶️ {{ record.playCount }}次
               </span>
             </div>
-
-            <div class="mt-2 text-xs text-slate-500 truncate">
+            <div class="mt-1 text-xs text-slate-500 truncate">
               {{ formatDate(record.lastPlayedAt) }}
             </div>
           </div>
@@ -133,7 +102,7 @@
           <!-- 删除按钮 -->
           <button
             @click.stop="confirmClear(record.videoId)"
-            class="absolute top-2 right-2 w-8 h-8 bg-black/50 hover:bg-red-600 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+            class="absolute top-2 right-2 z-10 w-8 h-8 bg-black/50 hover:bg-red-600 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
             title="删除此记录"
           >
             🗑️
@@ -149,6 +118,7 @@ import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useVideoStore } from '@/stores/videoStore'
 import { usePlayHistoryStore } from '@/stores/playHistoryStore'
+import VideoCard from '@/components/VideoCard.vue'
 import type { Video, VideoPlayRecord } from '@/types'
 
 const store = useVideoStore()

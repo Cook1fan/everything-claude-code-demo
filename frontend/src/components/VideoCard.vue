@@ -36,6 +36,13 @@
         </div>
       </div>
 
+      <!-- 质量不好标记 -->
+      <div v-if="isBadQuality" class="absolute top-2 left-2">
+        <span class="bg-red-600 text-white text-xs px-2 py-1 rounded font-medium shadow-lg">
+          🚫 质量不好
+        </span>
+      </div>
+
       <!-- 播放按钮覆盖层 -->
       <div class="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
         <div class="w-14 h-14 bg-white/90 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity transform scale-90 group-hover:scale-100">
@@ -55,7 +62,7 @@
             📦 {{ store.formatFileSize(video.fileSize) }}
           </span>
           <span class="shrink-0 text-blue-400">
-            🎬 {{ video.duration ? formatDuration(video.duration) : '--:--' }}
+            🎬 {{ videoDuration ? formatDuration(videoDuration) : '--:--' }}
           </span>
         </div>
         <div class="flex items-center justify-between text-xs">
@@ -107,6 +114,12 @@ const posterUrl = computed(() => {
 const playCount = computed(() => playHistory.getPlayCount(props.video.id))
 const totalPlayTime = computed(() => playHistory.getTotalPlayTime(props.video.id))
 const rating = computed(() => playHistory.getRating(props.video.id))
+const isBadQuality = computed(() => playHistory.getIsBadQuality(props.video.id))
+const videoDuration = computed(() => {
+  // 优先从播放历史获取，如果没有则用 video 对象的 duration
+  const savedDuration = playHistory.getVideoDuration(props.video.id)
+  return savedDuration ?? props.video.duration
+})
 
 function setRating(value: number) {
   playHistory.setRating(props.video.id, value)
