@@ -30,4 +30,23 @@ module.exports = {
 
   // 最小视频文件大小（字节），默认 1MB，过滤掉小文件
   minVideoSize: 1024 * 1024,
+
+  // FFmpeg 配置
+  ffmpeg: {
+    // FFmpeg 可执行文件路径（Windows 用户可以下载 ffmpeg.exe 放在项目根目录）
+    // 示例: './ffmpeg.exe' 或 'C:\\ffmpeg\\bin\\ffmpeg.exe'
+    path: './ffmpeg.exe',
+    // 雪碧图配置
+    sprite: {
+      // 每多少秒提取一帧
+      interval: 10,
+      // 雪碧图每行显示多少帧
+      columns: 5,
+      // 缩略图宽度（高度按比例计算）
+      thumbnailWidth: 160,
+      // 输出图片质量 (0-31, 31 是最低质量)
+      quality: 2,
+    }
+  },
+
 };

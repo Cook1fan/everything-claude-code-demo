@@ -42,32 +42,22 @@
           <!-- 左侧：播放器 -->
           <div class="flex-1">
             <!-- 播放器容器 -->
-            <div class="bg-black rounded-xl overflow-hidden shadow-2xl relative" ref="playerContainer">
+            <div class="bg-black rounded-xl overflow-hidden shadow-2xl relative">
               <video
                 ref="videoRef"
                 class="w-full"
                 playsinline
                 @error="handleVideoError"
-              ></video>
-              <!-- 进度条预览 - 会被移动到 Plyr 容器中 -->
-              <div
-                ref="previewContainer"
-                v-show="showPreview"
-                class="absolute bottom-16 pointer-events-none z-50"
-                :style="{ left: previewPosition + 'px', transform: 'translateX(-50%)' }"
               >
-                <div class="bg-slate-900 rounded-lg overflow-hidden shadow-2xl border border-slate-700">
-                  <canvas
-                    ref="previewCanvas"
-                    width="160"
-                    height="90"
-                    class="block"
-                  ></canvas>
-                  <div class="px-2 py-1 bg-slate-800 text-white text-xs text-center font-mono">
-                    {{ formatPreviewTime(previewTime) }}
-                  </div>
-                </div>
-              </div>
+                <!-- VTT 缩略图轨道 -->
+                <track
+                  v-if="video?.spriteVttPath"
+                  kind="metadata"
+                  label="Thumbnails"
+                  :src="getVttUrl(video.spriteVttPath)"
+                  default
+                />
+              </video>
             </div>
 
             <!-- 播放控制按钮 -->
@@ -191,7 +181,7 @@
                   <input
                     type="checkbox"
                     v-model="isBadQuality"
-                    class="w-4 h-4 rounded border-slate-600 bg-slate-700 text-red-500 focus:ring-red-500 focus:ring-offset-slate-800"
+                    class="w-4 h-4 rounded border-slate-600 bg-slate-700 text-red-500 focus:ring-red-500 focus:ring-offset-slate-80"
                   />
                   <span class="text-slate-300 text-sm">
                     🚫 质量不好
@@ -330,7 +320,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, computed, watch, nextTick } from 'vue'
+import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useVideoStore } from '@/stores/videoStore'
 import { usePlayHistoryStore } from '@/stores/playHistoryStore'
@@ -344,7 +334,6 @@ const playHistory = usePlayHistoryStore()
 const router = useRouter()
 const route = useRoute()
 const videoRef = ref<HTMLVideoElement | null>(null)
-const playerContainer = ref<HTMLDivElement | null>(null)
 const playError = ref<string | null>(null)
 const ffmpegAvailable = ref<boolean | null>(null)
 const spriteGenerating = ref(false)
@@ -360,17 +349,7 @@ const spriteImage = ref<HTMLImageElement | null>(null)
 const spriteLoaded = ref(false)
 let player: Plyr | null = null
 let isPlaying = false
-let globalMouseHandlerAdded = false
 let savePositionTimer: number | null = null
-
-// 进度条预览相关
-const previewCanvas = ref<HTMLCanvasElement | null>(null)
-const previewContainer = ref<HTMLDivElement | null>(null)
-const showPreview = ref(false)
-const previewPosition = ref(0)
-const previewTime = ref(0)
-let seekTimeout: number | null = null
-let progressContainer: HTMLElement | null = null
 
 function handleKeyDown(event: KeyboardEvent) {
   if (!player) return
@@ -579,196 +558,13 @@ function getMimeType(ext: string): string {
   return mimeTypes[ext.toLowerCase()] || 'video/mp4'
 }
 
-function formatDate(timestamp: number): string {
-  return new Date(timestamp).toLocaleString('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+function getVttUrl(vttPath: string): string {
+  return `${store.API_BASE || '/api'}/image?path=${encodeURIComponent(vttPath)}`
 }
 
 // 处理雪碧图图片加载
 function handleSpriteImageLoad() {
   // 雪碧图加载完成
-}
-
-// 格式化预览时间
-function formatPreviewTime(seconds: number): string {
-  const hrs = Math.floor(seconds / 3600)
-  const mins = Math.floor((seconds % 3600) / 60)
-  const secs = Math.floor(seconds % 60)
-  if (hrs > 0) {
-    return `${hrs}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
-  }
-  return `${mins}:${secs.toString().padStart(2, '0')}`
-}
-
-// 处理进度条鼠标移动 - 这个函数现在不再使用，保留以防万一
-function handlePreviewMouseMove(e: MouseEvent) {
-  handleGlobalMouseMove(e)
-}
-
-// 从雪碧图中提取帧
-function captureFrameFromSprite(targetTime: number) {
-  if (!spriteInfo.value || !spriteImage.value || !previewCanvas.value) return
-
-  const info = spriteInfo.value
-  const spriteImg = spriteImage.value
-  const canvas = previewCanvas.value
-  const ctx = canvas.getContext('2d')
-  if (!ctx) return
-
-  // 找到最接近的帧
-  let frameIndex = Math.floor(targetTime / info.interval)
-  frameIndex = Math.max(0, Math.min(frameIndex, info.frameCount - 1))
-
-  const frame = info.frames[frameIndex]
-  if (!frame) return
-
-  // 计算缩略图高度（假设 16:9）
-  const thumbnailHeight = info.thumbnailWidth * 9 / 16
-
-  // 从雪碧图中裁剪并绘制到预览画布
-  try {
-    ctx.drawImage(
-      spriteImg,
-      frame.x, frame.y, info.thumbnailWidth, thumbnailHeight,
-      0, 0, canvas.width, canvas.height
-    )
-  } catch (e) {
-    console.error('从雪碧图提取帧失败:', e)
-  }
-}
-
-// 处理进度条鼠标离开
-function handlePreviewMouseLeave() {
-  showPreview.value = false
-  if (seekTimeout) {
-    clearTimeout(seekTimeout)
-    seekTimeout = null
-  }
-}
-
-// 捕获预览画面到 Canvas
-function capturePreviewFrame() {
-  if (!videoRef.value || !previewCanvas.value) return
-
-  const canvas = previewCanvas.value
-  const video = videoRef.value
-  const ctx = canvas.getContext('2d')
-
-  if (ctx && video.videoWidth > 0 && video.videoHeight > 0) {
-    // 计算保持 16:9 比例的裁剪区域
-    const targetRatio = 16 / 9
-    const videoRatio = video.videoWidth / video.videoHeight
-
-    let sourceX = 0
-    let sourceY = 0
-    let sourceWidth = video.videoWidth
-    let sourceHeight = video.videoHeight
-
-    if (videoRatio > targetRatio) {
-      // 视频太宽，裁剪左右
-      sourceWidth = video.videoHeight * targetRatio
-      sourceX = (video.videoWidth - sourceWidth) / 2
-    } else {
-      // 视频太高，裁剪上下
-      sourceHeight = video.videoWidth / targetRatio
-      sourceY = (video.videoHeight - sourceHeight) / 2
-    }
-
-    try {
-      ctx.drawImage(
-        video,
-        sourceX, sourceY, sourceWidth, sourceHeight,
-        0, 0, canvas.width, canvas.height
-      )
-    } catch (e) {
-      // 忽略绘制错误
-    }
-  }
-}
-
-// 设置进度条预览事件 - 现在什么都不做，因为我们直接在 onMounted 添加了
-function setupProgressPreview() {
-  console.log('setupProgressPreview 被调用 (跳过，已在 onMounted 添加)')
-}
-
-// 清理进度条预览
-function cleanupProgressPreview() {
-  if (seekTimeout) {
-    clearTimeout(seekTimeout)
-    seekTimeout = null
-  }
-  showPreview.value = false
-}
-
-// 把预览容器移到 Plyr 容器中
-function movePreviewToPlyrContainer() {
-  if (!player || !previewContainer.value) return
-
-  const plyrContainer = player.elements.container
-  const previewEl = previewContainer.value
-
-  if (plyrContainer && previewEl && !plyrContainer.contains(previewEl)) {
-    // 确保 Plyr 容器是 relative 定位
-    plyrContainer.style.position = 'relative'
-    // 把预览容器移到 Plyr 容器里
-    plyrContainer.appendChild(previewEl)
-    // 修改样式，适配 Plyr 容器
-    previewEl.style.position = 'absolute'
-    previewEl.style.bottom = '64px'
-    previewEl.style.left = '0'
-    // 去掉原来的 left style，因为我们要用 previewPosition 来控制
-  }
-}
-
-// 全局鼠标移动处理
-function handleGlobalMouseMove(e: MouseEvent) {
-  if (!player || !previewCanvas.value || !previewContainer.value) {
-    return
-  }
-
-  // 确保预览容器在 Plyr 里
-  movePreviewToPlyrContainer()
-
-  // 找到进度条元素
-  const progressBar = player.elements.container?.querySelector('.plyr__progress')
-  if (!progressBar) return
-
-  // 检查鼠标是否在进度条上方
-  const progressRect = progressBar.getBoundingClientRect()
-  const isOverProgress =
-    e.clientX >= progressRect.left &&
-    e.clientX <= progressRect.right &&
-    e.clientY >= progressRect.top &&
-    e.clientY <= progressRect.bottom
-
-  if (!isOverProgress) {
-    showPreview.value = false
-    return
-  }
-
-  // 计算相对于 Plyr 容器的位置
-  const plyrContainerRect = player.elements.container!.getBoundingClientRect()
-  const relativeX = e.clientX - plyrContainerRect.left
-
-  // 更新预览位置和状态
-  previewPosition.value = relativeX
-  showPreview.value = true
-
-  // 计算时间
-  const percent = Math.max(0, Math.min(1, (e.clientX - progressRect.left) / progressRect.width))
-  const duration = player.duration || 0
-  const targetTime = percent * duration
-  previewTime.value = targetTime
-
-  // 如果有雪碧图，直接从雪碧图提取帧
-  if (spriteLoaded.value && spriteInfo.value && spriteImage.value) {
-    captureFrameFromSprite(targetTime)
-  }
 }
 
 // 保存当前播放位置
@@ -786,7 +582,6 @@ function loadPlayer() {
   playError.value = null
 
   if (player) {
-    cleanupProgressPreview()
     player.source = {
       type: 'video',
       sources: [
@@ -796,11 +591,15 @@ function loadPlayer() {
         },
       ],
       poster: video.value.posterPath ? store.getImageUrl(video.value) : undefined,
+      tracks: video.value.spriteVttPath ? [
+        {
+          kind: 'metadata',
+          label: 'Thumbnails',
+          src: getVttUrl(video.value.spriteVttPath),
+          default: true,
+        }
+      ] : undefined,
     }
-    // 重新设置进度条预览
-    setTimeout(() => {
-      setupProgressPreview()
-    }, 100)
   } else {
     if (videoRef.value) {
       videoRef.value.preload = 'metadata'
@@ -898,10 +697,6 @@ function loadPlayer() {
           player.currentTime = lastPosition
         }
       }
-      // 设置进度条预览
-      setTimeout(() => {
-        setupProgressPreview()
-      }, 100)
     })
   }
 }
@@ -1044,10 +839,6 @@ onMounted(async () => {
   playHistory.resetPlayCountMarker()
   window.addEventListener('keydown', handleKeyDown)
 
-  // 添加全局鼠标监听
-  window.addEventListener('mousemove', handleGlobalMouseMove)
-  globalMouseHandlerAdded = true
-
   setTimeout(() => {
     loadPlayer()
   }, 100)
@@ -1055,7 +846,6 @@ onMounted(async () => {
 
 // 当视频信息加载完成后，加载雪碧图
 watch(video, async (newVideo) => {
-  console.log('video 变化了:', newVideo)
   if (newVideo) {
     await loadSprite()
   }
@@ -1066,7 +856,6 @@ watch(() => route.params.id, async (newId, oldId) => {
   if (oldId) {
     saveCurrentPosition()
   }
-  cleanupProgressPreview()
   playHistory.stopSession()
   playHistory.resetPlayCountMarker()
 
@@ -1076,16 +865,10 @@ watch(() => route.params.id, async (newId, oldId) => {
 })
 
 onBeforeUnmount(() => {
-  cleanupProgressPreview()
   playHistory.stopSession()
   // 离开页面时保存最后播放位置
   saveCurrentPosition()
   window.removeEventListener('keydown', handleKeyDown)
-  // 清理全局鼠标监听
-  if (globalMouseHandlerAdded) {
-    window.removeEventListener('mousemove', handleGlobalMouseMove)
-    globalMouseHandlerAdded = false
-  }
   // 清理保存位置定时器
   if (savePositionTimer) {
     clearInterval(savePositionTimer)

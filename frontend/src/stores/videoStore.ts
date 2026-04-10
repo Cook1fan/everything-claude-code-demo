@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { Video, VideoData, ScanStatus, DirectoryTreeNode } from '@/types'
+import type { Video, VideoData, ScanStatus, DirectoryTreeNode, SpriteInfo } from '@/types'
 import * as indexedDB from '@/utils/indexedDB'
 
 const API_BASE = '/api'
@@ -81,7 +81,12 @@ export const useVideoStore = defineStore('video', () => {
     let result = Array.isArray(videos.value) ? [...videos.value] : []
 
     if (selectedDirectory.value) {
-      result = result.filter(v => v.directory === selectedDirectory.value)
+      // 显示选中目录及其所有子目录下的视频
+      result = result.filter(v => {
+        // 检查视频目录是否等于选中目录，或是选中目录的子目录
+        return v.directory === selectedDirectory.value ||
+               v.directory.startsWith(selectedDirectory.value + '/')
+      })
     }
 
     if (searchQuery.value) {
@@ -241,6 +246,56 @@ export const useVideoStore = defineStore('video', () => {
     return `${API_BASE}/image?path=${encodeURIComponent(video.posterPath)}`
   }
 
+  function getSpriteUrl(video: Video) {
+    if (!video.spritePath) return ''
+    return `${API_BASE}/image?path=${encodeURIComponent(video.spritePath)}`
+  }
+
+  async function checkFFmpegStatus() {
+    try {
+      const res = await fetch(`${API_BASE}/ffmpeg/status`)
+      return await res.json()
+    } catch (err) {
+      console.error('检查 FFmpeg 状态失败:', err)
+      return { available: false, message: '检查失败' }
+    }
+  }
+
+  async function generateSprite(videoPath: string, force: boolean = false) {
+    try {
+      const res = await fetch(`${API_BASE}/sprite/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: videoPath, force }),
+      })
+      return await res.json()
+    } catch (err) {
+      console.error('生成雪碧图失败:', err)
+      return { success: false, message: '请求失败' }
+    }
+  }
+
+  async function getSpriteStatus() {
+    try {
+      const res = await fetch(`${API_BASE}/sprite/status`)
+      return await res.json()
+    } catch (err) {
+      console.error('获取雪碧图状态失败:', err)
+      return { inProgress: false, status: null }
+    }
+  }
+
+  async function getSpriteInfo(spritePath: string): Promise<SpriteInfo | null> {
+    try {
+      const res = await fetch(`${API_BASE}/sprite/info?path=${encodeURIComponent(spritePath)}`)
+      if (!res.ok) return null
+      return await res.json()
+    } catch (err) {
+      console.error('获取雪碧图信息失败:', err)
+      return null
+    }
+  }
+
   function addToRecent(videoId: string) {
     const recent = recentVideos.value.filter(id => id !== videoId)
     recent.unshift(videoId)
@@ -296,6 +351,11 @@ export const useVideoStore = defineStore('video', () => {
     startScan,
     getVideoUrl,
     getImageUrl,
+    getSpriteUrl,
+    checkFFmpegStatus,
+    generateSprite,
+    getSpriteStatus,
+    getSpriteInfo,
     addToRecent,
     formatFileSize,
   }

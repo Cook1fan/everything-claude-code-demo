@@ -287,6 +287,37 @@ function createSpriteInfo(outputPath, frameCount, interval, columns, thumbnailWi
   return infoPath;
 }
 
+// 生成 VTT 缩略图文件
+function createSpriteVTT(outputPath, frameCount, interval, columns, thumbnailWidth, duration) {
+  const vttPath = outputPath.replace(/\.(jpg|jpeg|png)$/, '.vtt');
+  const spriteFileName = path.basename(outputPath);
+  const rows = Math.ceil(frameCount / columns);
+  const thumbnailHeight = Math.round(thumbnailWidth * 9 / 16);
+
+  // 格式化时间为 HH:MM:SS.mmm
+  function formatTime(sec) {
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = sec % 60;
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toFixed(3).padStart(6, '0')}`;
+  }
+
+  let vttContent = 'WEBVTT\n\n';
+
+  for (let i = 0; i < frameCount; i++) {
+    const startSec = i * interval;
+    const endSec = Math.min(startSec + interval, duration);
+    const x = (i % columns) * thumbnailWidth;
+    const y = Math.floor(i / columns) * thumbnailHeight;
+
+    vttContent += `${formatTime(startSec)} --> ${formatTime(endSec)}\n`;
+    vttContent += `${spriteFileName}#xywh=${x},${y},${thumbnailWidth},${thumbnailHeight}\n\n`;
+  }
+
+  fs.writeFileSync(vttPath, vttContent, 'utf-8');
+  return vttPath;
+}
+
 // 主函数：生成视频雪碧图
 async function generateSprite(videoPath, options = {}, onProgress) {
   const startTime = Date.now();
@@ -369,6 +400,7 @@ async function generateSprite(videoPath, options = {}, onProgress) {
       onProgress({ stage: 'saving', percent: 96, message: '正在保存信息文件...' });
     }
     createSpriteInfo(outputPath, framePaths.length, actualInterval, columns, thumbnailWidth, duration);
+    createSpriteVTT(outputPath, framePaths.length, actualInterval, columns, thumbnailWidth, duration);
 
     if (onProgress) {
       onProgress({ stage: 'complete', percent: 100, message: '生成完成！' });

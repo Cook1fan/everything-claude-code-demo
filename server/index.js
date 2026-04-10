@@ -3,6 +3,7 @@ const cors = require('cors');
 const path = require('path');
 const { exec } = require('child_process');
 const { scan } = require('../scanner/scan');
+const { checkFFmpeg, generateSprite } = require('../scanner/spriteGenerator');
 const config = require('../scanner/config');
 const fs = require('fs');
 
@@ -194,6 +195,8 @@ app.get('/api/image', (req, res) => {
   if (ext === '.png') contentType = 'image/png';
   else if (ext === '.webp') contentType = 'image/webp';
   else if (ext === '.gif') contentType = 'image/gif';
+  else if (ext === '.vtt') contentType = 'text/vtt; charset=utf-8';
+  else if (ext === '.json') contentType = 'application/json; charset=utf-8';
 
   res.writeHead(200, {
     'Content-Type': contentType,
@@ -299,6 +302,145 @@ app.post('/api/open-directory', (req, res) => {
   }
 });
 
+// API: 检查 FFmpeg 状态
+app.get('/api/ffmpeg/status', async (req, res) => {
+  try {
+    const status = await checkFFmpeg();
+    res.json(status);
+  } catch (err) {
+    console.error('检查 FFmpeg 失败:', err);
+    res.json({
+      available: false,
+      path: null,
+      message: '检查 FFmpeg 时出错: ' + err.message
+    });
+  }
+});
+
+
+// 雪碧图生成状态
+let spriteGenerationInProgress = false;
+let spriteGenerationStatus = null;
+
+// API: 生成雪碧图
+app.post('/api/sprite/generate', async (req, res) => {
+  const videoPath = req.body.path;
+  const force = req.body.force || false;
+  if (!videoPath) {
+    return res.status(400).json({ error: '缺少 path 参数' });
+  }
+
+  const resolvedPath = path.resolve(videoPath);
+  if (!fs.existsSync(resolvedPath)) {
+    return res.status(404).json({ error: '视频文件不存在' });
+  }
+
+  if (spriteGenerationInProgress) {
+    return res.json({ success: false, message: '正在生成其他雪碧图，请稍候...' });
+  }
+
+  // 检查 FFmpeg
+  const ffmpegStatus = await checkFFmpeg();
+  if (!ffmpegStatus.available) {
+    return res.json({
+      success: false,
+      message: ffmpegStatus.message || 'FFmpeg 不可用'
+    });
+  }
+
+  spriteGenerationInProgress = true;
+  spriteGenerationStatus = { videoPath: resolvedPath, progress: 0, message: '开始生成...' };
+
+  res.json({ success: true, message: '雪碧图生成已开始' });
+
+  // 异步执行生成
+  (async () => {
+    try {
+      const result = await generateSprite(resolvedPath, { force }, (progress) => {
+        spriteGenerationStatus = {
+          videoPath: resolvedPath,
+          percent: progress.percent || 0,
+          message: progress.message || '处理中...',
+          stage: progress.stage,
+          frameCount: progress.frameCount,
+          totalFrames: progress.totalFrames
+        };
+      });
+
+      // 更新 videos.json 添加雪碧图路径和 VTT 路径
+      const dataPath = path.resolve(config.outputPath);
+      if (fs.existsSync(dataPath)) {
+        const data = JSON.parse(fs.readFileSync(dataPath, 'utf-8'));
+        const videoIndex = data.videos.findIndex(v => v.videoPath === normalizePath(resolvedPath));
+        if (videoIndex !== -1) {
+          data.videos[videoIndex].spritePath = normalizePath(result.spritePath);
+          const vttPath = result.spritePath.replace(/\.(jpg|jpeg|png)$/, '.vtt');
+          data.videos[videoIndex].spriteVttPath = normalizePath(vttPath);
+          fs.writeFileSync(dataPath, JSON.stringify(data, null, 2), 'utf-8');
+        }
+      }
+
+      spriteGenerationStatus = {
+        ...result,
+        percent: 100,
+        message: '生成完成!'
+      };
+
+      // 等待1秒，确保前端收到最后的100%更新
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    } catch (err) {
+      console.error('生成雪碧图失败:', err);
+      spriteGenerationStatus = {
+        error: true,
+        message: '生成失败: ' + err.message
+      };
+    } finally {
+      spriteGenerationInProgress = false;
+      // 5分钟后清理状态
+      setTimeout(() => {
+        if (spriteGenerationStatus && !spriteGenerationInProgress) {
+          spriteGenerationStatus = null;
+        }
+      }, 5 * 60 * 1000);
+    }
+  })();
+});
+
+// API: 获取雪碧图生成状态
+app.get('/api/sprite/status', (req, res) => {
+  res.json({
+    inProgress: spriteGenerationInProgress,
+    status: spriteGenerationStatus
+  });
+});
+
+// API: 获取雪碧图信息
+app.get('/api/sprite/info', (req, res) => {
+  const spritePath = req.query.path;
+  if (!spritePath) {
+    return res.status(400).json({ error: '缺少 path 参数' });
+  }
+
+  const resolvedPath = path.resolve(spritePath);
+  const infoPath = resolvedPath.replace(/\.(jpg|jpeg|png)$/, '.json');
+
+  if (!fs.existsSync(infoPath)) {
+    return res.status(404).json({ error: '雪碧图信息文件不存在' });
+  }
+
+  try {
+    const info = JSON.parse(fs.readFileSync(infoPath, 'utf-8'));
+    res.json(info);
+  } catch (err) {
+    res.status(500).json({ error: '读取雪碧图信息失败' });
+  }
+});
+
+// 规范化路径分隔符
+function normalizePath(p) {
+  return p.replace(/\\/g, '/');
+}
+
 // 启动服务器
 ensureDataFile();
 app.listen(PORT, () => {
@@ -311,4 +453,8 @@ app.listen(PORT, () => {
   console.log(`  GET  /api/image        - 图片文件服务`);
   console.log(`  POST /api/open-video   - 用本地播放器打开视频`);
   console.log(`  POST /api/open-directory - 打开文件所在目录`);
+  console.log(`  GET  /api/ffmpeg/status - 检查 FFmpeg 状态`);
+  console.log(`  POST /api/sprite/generate - 生成雪碧图`);
+  console.log(`  GET  /api/sprite/status - 获取雪碧图生成状态`);
+  console.log(`  GET  /api/sprite/info - 获取雪碧图信息`);
 });

@@ -28,6 +28,10 @@ data/*.json
 *.log
 npm-debug.log*
 
+# FFmpeg binary
+ffmpeg.exe
+ffmpeg
+
 # Temporary files
 *.tmp
 *.temp

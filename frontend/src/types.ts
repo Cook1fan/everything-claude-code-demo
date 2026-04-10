@@ -6,6 +6,7 @@ export interface Video {
   videoPath: string;
   posterPath?: string;
   spritePath?: string;
+  spriteVttPath?: string;
   videoExtension: string;
   posterExtension?: string;
   fileSize?: number;
