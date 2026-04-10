@@ -98,7 +98,7 @@ function cleanupTempDir(tempDir) {
 }
 
 // 使用 FFmpeg 提取帧
-function extractFrames(ffmpegPath, videoPath, tempDir, interval, duration, onProgress) {
+function extractFrames(ffmpegPath, videoPath, tempDir, interval, duration, thumbnailWidth, onProgress) {
   return new Promise((resolve, reject) => {
     const totalFrames = Math.ceil(duration / interval);
 
@@ -111,17 +111,17 @@ function extractFrames(ffmpegPath, videoPath, tempDir, interval, duration, onPro
 
     const outputPattern = path.join(tempDir, 'frame_%04d.jpg');
 
+    const thumbnailHeight = Math.round(thumbnailWidth * 9 / 16);
     const args = [
       '-y',
-      '-err_detect', 'ignore_err+crccheck+bitstream',
-      '-fflags', '+genpts+igndts+discardcorrupt+fastseek+nobuffer',
-      '-flags', '+low_delay+global_header',
-      '-skip_frame', 'nokey',
+      '-err_detect', 'ignore_err',
+      '-fflags', '+genpts+igndts+discardcorrupt+fastseek',
+      '-flags', '+low_delay',
       '-i', videoPath,
       '-vsync', '0',
       '-async', '0',
-      '-vf', `fps=1/${interval},scale=160:90`,
-      '-q:v', '15',
+      '-vf', `fps=1/${interval},scale=${thumbnailWidth}:${thumbnailHeight}:flags=lanczos`,
+      '-q:v', '6',
       '-threads', '8',
       '-f', 'image2',
       outputPattern
@@ -234,7 +234,9 @@ function createSprite(ffmpegPath, framePaths, outputPath, columns, thumbnailWidt
       '-safe', '0',
       '-i', listFile,
       '-vf', `scale=${thumbnailWidth}:-1,tile=${columns}x${rows}`,
-      '-q:v', '2',
+      '-q:v', '1',
+      '-qmin', '1',
+      '-qmax', '1',
       '-y',
       outputPath
     ];
@@ -382,6 +384,7 @@ async function generateSprite(videoPath, options = {}, onProgress) {
       tempDir,
       interval,
       duration,
+      thumbnailWidth,
       onProgress
     );
 

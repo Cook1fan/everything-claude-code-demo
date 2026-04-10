@@ -48,16 +48,7 @@
                 class="w-full"
                 playsinline
                 @error="handleVideoError"
-              >
-                <!-- VTT 缩略图轨道 -->
-                <track
-                  v-if="video?.spriteVttPath"
-                  kind="metadata"
-                  label="Thumbnails"
-                  :src="getVttUrl(video.spriteVttPath)"
-                  default
-                />
-              </video>
+              />
             </div>
 
             <!-- 播放控制按钮 -->
@@ -350,6 +341,7 @@ const spriteLoaded = ref(false)
 let player: Plyr | null = null
 let isPlaying = false
 let savePositionTimer: number | null = null
+let currentVttBlobUrl: string | null = null
 
 function handleKeyDown(event: KeyboardEvent) {
   if (!player) return
@@ -576,13 +568,106 @@ function saveCurrentPosition() {
   }
 }
 
-function loadPlayer() {
+// 清理之前的 VTT Blob URL
+function cleanupVttBlobUrl() {
+  if (currentVttBlobUrl) {
+    URL.revokeObjectURL(currentVttBlobUrl)
+    currentVttBlobUrl = null
+  }
+}
+
+// 转义正则表达式特殊字符
+function escapeRegExp(string: string): string {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+// 动态加载并修改 VTT 文件，使雪碧图路径正确
+async function getVttBlobUrl(vttPath: string, spritePath: string): Promise<string | null> {
+  // 先清理旧的
+  cleanupVttBlobUrl()
+
+  try {
+    // 加载 VTT 文件内容
+    const response = await fetch(getVttUrl(vttPath))
+    if (!response.ok) {
+      console.error('VTT 文件加载失败:', response.status)
+      return null
+    }
+
+    let vttContent = await response.text()
+    const spriteFileName = spritePath.split(/[\\/]/).pop()
+
+    console.log('原始 VTT 内容:', vttContent.substring(0, 300) + '...')
+    console.log('雪碧图文件名:', spriteFileName)
+
+    // 替换 VTT 中的雪碧图文件名为完整的 API URL
+    if (spriteFileName) {
+      const spriteUrl = store.getSpriteUrl({ spritePath } as any)
+      console.log('雪碧图 URL:', spriteUrl)
+      // 替换所有 "filename#xywh=" 为 "完整URL#xywh="
+      // 使用字符串替换而不是正则表达式，避免特殊字符问题
+      const searchStr = `${spriteFileName}#xywh=`
+      const replaceStr = `${spriteUrl}#xywh=`
+      vttContent = vttContent.split(searchStr).join(replaceStr)
+    }
+
+    console.log('修改后的 VTT 内容:', vttContent.substring(0, 300) + '...')
+
+    // 创建 Blob URL
+    const blob = new Blob([vttContent], { type: 'text/vtt' })
+    currentVttBlobUrl = URL.createObjectURL(blob)
+    console.log('创建的 VTT Blob URL:', currentVttBlobUrl)
+    return currentVttBlobUrl
+  } catch (err) {
+    console.error('处理 VTT 文件失败:', err)
+    return null
+  }
+}
+
+async function loadPlayer() {
   if (!videoRef.value || !video.value) return
 
   playError.value = null
 
+  // 如果有 VTT，先处理它
+  let vttBlobUrl: string | null = null
+  if (video.value.spriteVttPath && video.value.spritePath) {
+    vttBlobUrl = await getVttBlobUrl(video.value.spriteVttPath, video.value.spritePath)
+    console.log('VTT Blob URL:', vttBlobUrl)
+  }
+
+  // 构建 Plyr 配置
+  const plyrConfig: any = {
+    autoplay: false,
+    preload: 'metadata',
+    controls: [
+      'play-large',
+      'play',
+      'progress',
+      'current-time',
+      'mute',
+      'volume',
+      'captions',
+      'settings',
+      'pip',
+      'airplay',
+      'fullscreen',
+    ],
+    keyboard: { focused: true, global: true },
+    ratio: '16:9',
+    seekTime: 10,
+  }
+
+  // 只有在有 VTT 时才添加预览缩略图配置
+  if (vttBlobUrl) {
+    plyrConfig.previewThumbnails = {
+      enabled: true,
+      src: vttBlobUrl,
+    }
+  }
+
   if (player) {
-    player.source = {
+    const sourceConfig: any = {
       type: 'video',
       sources: [
         {
@@ -591,15 +676,14 @@ function loadPlayer() {
         },
       ],
       poster: video.value.posterPath ? store.getImageUrl(video.value) : undefined,
-      tracks: video.value.spriteVttPath ? [
-        {
-          kind: 'metadata',
-          label: 'Thumbnails',
-          src: getVttUrl(video.value.spriteVttPath),
-          default: true,
-        }
-      ] : undefined,
     }
+    if (vttBlobUrl) {
+      sourceConfig.previewThumbnails = {
+        enabled: true,
+        src: vttBlobUrl,
+      }
+    }
+    player.source = sourceConfig
   } else {
     if (videoRef.value) {
       videoRef.value.preload = 'metadata'
@@ -609,26 +693,7 @@ function loadPlayer() {
       }
     }
 
-    player = new Plyr(videoRef.value, {
-      autoplay: false,
-      preload: 'metadata',
-      controls: [
-        'play-large',
-        'play',
-        'progress',
-        'current-time',
-        'mute',
-        'volume',
-        'captions',
-        'settings',
-        'pip',
-        'airplay',
-        'fullscreen',
-      ],
-      keyboard: { focused: true, global: true },
-      ratio: '16:9',
-      seekTime: 10,
-    })
+    player = new Plyr(videoRef.value, plyrConfig)
 
     player.on('play', () => {
       isPlaying = true
@@ -882,6 +947,8 @@ onBeforeUnmount(() => {
     clearInterval(countdownTimer.value)
     countdownTimer.value = null
   }
+  // 清理 VTT Blob URL
+  cleanupVttBlobUrl()
   // 重置进度状态
   spriteStatusPercent.value = 0
   spriteStatusMessage.value = ''
