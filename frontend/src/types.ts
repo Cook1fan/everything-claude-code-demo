@@ -5,6 +5,7 @@ export interface Video {
   hardDrive: string;
   videoPath: string;
   posterPath?: string;
+  spritePath?: string;
   videoExtension: string;
   posterExtension?: string;
   fileSize?: number;
@@ -53,6 +54,7 @@ export interface VideoPlayRecord {
   timestamps?: VideoTimestamp[]; // 精彩时间点
   videoDuration?: number; // 视频总时长（秒）
   isBadQuality?: boolean; // 质量是否不好
+  lastPlaybackPosition?: number; // 最后播放位置（秒）
 }
 
 export interface VideoPlaySession {
@@ -61,4 +63,22 @@ export interface VideoPlaySession {
   lastUpdateTime: number;
   accumulatedTime: number;
   hasCountedPlay: boolean; // 是否已在此次页面访问中计数播放次数
+}
+
+export interface SpriteFrame {
+  index: number;
+  time: number;
+  x: number;
+  y: number;
+}
+
+export interface SpriteInfo {
+  version: string;
+  frameCount: number;
+  interval: number;
+  columns: number;
+  rows: number;
+  thumbnailWidth: number;
+  duration: number;
+  frames: SpriteFrame[];
 }

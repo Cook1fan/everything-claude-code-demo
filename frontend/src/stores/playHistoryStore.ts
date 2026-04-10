@@ -241,6 +241,30 @@ export const usePlayHistoryStore = defineStore('playHistory', () => {
     }
   }
 
+  // 获取最后播放位置
+  function getLastPlaybackPosition(videoId: string): number {
+    return playRecords.value.get(videoId)?.lastPlaybackPosition || 0
+  }
+
+  // 设置最后播放位置
+  function setLastPlaybackPosition(videoId: string, position: number) {
+    const existing = playRecords.value.get(videoId)
+    if (existing) {
+      existing.lastPlaybackPosition = position
+      saveToDB(existing)
+    } else {
+      const newRecord: VideoPlayRecord = {
+        videoId,
+        playCount: 0,
+        totalPlayTime: 0,
+        lastPlayedAt: Date.now(),
+        lastPlaybackPosition: position,
+      }
+      playRecords.value.set(videoId, newRecord)
+      saveToDB(newRecord)
+    }
+  }
+
   // 获取质量标记
   function getIsBadQuality(videoId: string): boolean {
     return playRecords.value.get(videoId)?.isBadQuality || false
@@ -369,6 +393,8 @@ export const usePlayHistoryStore = defineStore('playHistory', () => {
     resetPlayCountMarker,
     getVideoDuration,
     setVideoDuration,
+    getLastPlaybackPosition,
+    setLastPlaybackPosition,
     getIsBadQuality,
     setIsBadQuality,
   }
