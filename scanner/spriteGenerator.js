@@ -4,20 +4,21 @@ const path = require('path');
 const config = require('./config');
 
 // 根据视频时长动态计算最佳帧间隔
+// 行业通用方案：＜10分钟3秒一帧，10分钟～2小时5秒一帧，＞2小时10秒一帧
 function calculateOptimalInterval(duration, configInterval = 10) {
-  const hours = duration / 3600;
+  const minutes = duration / 60;
   let interval;
 
-  if (hours < 1) {
-    interval = 10;
-  } else if (hours <= 2) {
+  if (minutes < 10) {
+    interval = 3;
+  } else if (minutes <= 120) { // 10分钟～2小时
     interval = 5;
   } else {
     interval = 10;
   }
 
   const estimatedFrames = Math.ceil(duration / interval);
-  console.log(`视频时长 ${duration} 秒 (${hours.toFixed(1)}小时)，帧间隔: ${interval}s，预计 ${estimatedFrames} 帧`);
+  console.log(`视频时长 ${duration} 秒 (${minutes.toFixed(1)}分钟)，帧间隔: ${interval}s，预计 ${estimatedFrames} 帧`);
   return interval;
 }
 
@@ -98,7 +99,7 @@ function cleanupTempDir(tempDir) {
 }
 
 // 使用 FFmpeg 提取帧
-function extractFrames(ffmpegPath, videoPath, tempDir, interval, duration, thumbnailWidth, onProgress) {
+function extractFrames(ffmpegPath, videoPath, tempDir, interval, duration, thumbnailWidth, quality = 3, onProgress) {
   return new Promise((resolve, reject) => {
     const totalFrames = Math.ceil(duration / interval);
 
@@ -112,17 +113,21 @@ function extractFrames(ffmpegPath, videoPath, tempDir, interval, duration, thumb
     const outputPattern = path.join(tempDir, 'frame_%04d.jpg');
 
     const thumbnailHeight = Math.round(thumbnailWidth * 9 / 16);
+
     const args = [
       '-y',
       '-err_detect', 'ignore_err',
       '-fflags', '+genpts+igndts+discardcorrupt+fastseek',
-      '-flags', '+low_delay',
+      '-max_error_rate', '1.0',
+      '-skip_frame', 'nokey',
+      '-thread_queue_size', '1024',
       '-i', videoPath,
-      '-vsync', '0',
-      '-async', '0',
-      '-vf', `fps=1/${interval},scale=${thumbnailWidth}:${thumbnailHeight}:flags=lanczos`,
-      '-q:v', '6',
-      '-threads', '8',
+      '-an',
+      '-sn',
+      '-vf', `fps=1/${interval},scale=${thumbnailWidth}:${thumbnailHeight}`,
+      '-fps_mode', 'vfr',
+      '-q:v', String(quality),
+      '-threads', '16',
       '-f', 'image2',
       outputPattern
     ];
@@ -151,7 +156,7 @@ function extractFrames(ffmpegPath, videoPath, tempDir, interval, duration, thumb
 
       if (frames.length > 0) {
         if (onProgress) {
-          onProgress({ stage: 'extracting', percent: 80, message: '帧提取完成', frameCount: frames.length, totalFrames });
+          onProgress({ stage: 'extracting', percent: 99, message: '帧提取完成', frameCount: frames.length, totalFrames });
         }
         resolve({
           framePaths: frames.map(f => path.join(tempDir, f)),
@@ -174,7 +179,7 @@ function extractFrames(ffmpegPath, videoPath, tempDir, interval, duration, thumb
 
         if (frames.length === lastFrameCount) {
           stuckCount++;
-          console.log(`进度检测: ${frames.length} 帧, 卡住 ${stuckCount}/${maxStuckCount}`);
+          // console.log(`进度检测: ${frames.length} 帧, 卡住 ${stuckCount}/${maxStuckCount}`);
           if (stuckCount >= maxStuckCount) {
             console.log('FFmpeg 似乎卡住了，强制终止...');
             try {
@@ -189,7 +194,8 @@ function extractFrames(ffmpegPath, videoPath, tempDir, interval, duration, thumb
         }
 
         if (onProgress && totalFrames > 0) {
-          const percent = Math.min(80, Math.round((frames.length / totalFrames) * 80));
+          // FFmpeg还在运行时，最大只到98%，等真正完成了再到99%
+          const percent = Math.min(98, Math.round((frames.length / totalFrames) * 99));
           onProgress({
             stage: 'extracting',
             percent,
@@ -220,7 +226,7 @@ function createSprite(ffmpegPath, framePaths, outputPath, columns, thumbnailWidt
     }
 
     if (onProgress) {
-      onProgress({ stage: 'merging', percent: 85, message: '正在合并雪碧图...' });
+      onProgress({ stage: 'merging', percent: 99.2, message: '正在合并雪碧图...' });
     }
 
     const listFile = path.join(path.dirname(outputPath), '.frames_list.txt');
@@ -250,7 +256,7 @@ function createSprite(ffmpegPath, framePaths, outputPath, columns, thumbnailWidt
         reject(error);
       } else {
         if (onProgress) {
-          onProgress({ stage: 'merging', percent: 93, message: '正在保存信息...' });
+          onProgress({ stage: 'merging', percent: 99.5, message: '正在保存信息...' });
         }
         resolve(outputPath);
       }
@@ -320,6 +326,37 @@ function createSpriteVTT(outputPath, frameCount, interval, columns, thumbnailWid
   return vttPath;
 }
 
+// 从雪碧图 JSON 信息文件生成 VTT 文件
+function createVttFromJson(spritePath) {
+  const jsonPath = spritePath.replace(/\.(jpg|jpeg|png)$/, '.json');
+  const vttPath = spritePath.replace(/\.(jpg|jpeg|png)$/, '.vtt');
+
+  // 如果 VTT 已存在，不需要重新生成
+  if (fs.existsSync(vttPath)) {
+    return vttPath;
+  }
+
+  // 如果 JSON 不存在，无法生成
+  if (!fs.existsSync(jsonPath)) {
+    return null;
+  }
+
+  try {
+    const info = JSON.parse(fs.readFileSync(jsonPath, 'utf-8'));
+    return createSpriteVTT(
+      spritePath,
+      info.frameCount,
+      info.interval,
+      info.columns,
+      info.thumbnailWidth,
+      info.duration
+    );
+  } catch (err) {
+    console.warn(`生成 VTT 文件失败 (${jsonPath}):`, err.message);
+    return null;
+  }
+}
+
 // 主函数：生成视频雪碧图
 async function generateSprite(videoPath, options = {}, onProgress) {
   const startTime = Date.now();
@@ -335,6 +372,7 @@ async function generateSprite(videoPath, options = {}, onProgress) {
     interval: configInterval = 10,
     columns = 5,
     thumbnailWidth = 160,
+    quality = 3,
   } = spriteConfig;
 
   const videoDir = path.dirname(videoPath);
@@ -368,9 +406,6 @@ async function generateSprite(videoPath, options = {}, onProgress) {
 
   let tempDir = null;
   try {
-    if (onProgress) {
-      onProgress({ stage: 'starting', percent: 5, message: '正在获取视频信息...' });
-    }
 
     const duration = await getVideoDuration(ffmpegPath, videoPath);
     console.log('视频时长:', duration, '秒');
@@ -385,6 +420,7 @@ async function generateSprite(videoPath, options = {}, onProgress) {
       interval,
       duration,
       thumbnailWidth,
+      quality,
       onProgress
     );
 
@@ -400,7 +436,7 @@ async function generateSprite(videoPath, options = {}, onProgress) {
     await createSprite(ffmpegPath, framePaths, outputPath, columns, thumbnailWidth, onProgress);
 
     if (onProgress) {
-      onProgress({ stage: 'saving', percent: 96, message: '正在保存信息文件...' });
+      onProgress({ stage: 'saving', percent: 99.8, message: '正在保存信息文件...' });
     }
     createSpriteInfo(outputPath, framePaths.length, actualInterval, columns, thumbnailWidth, duration);
     createSpriteVTT(outputPath, framePaths.length, actualInterval, columns, thumbnailWidth, duration);
@@ -436,5 +472,6 @@ async function generateSprite(videoPath, options = {}, onProgress) {
 module.exports = {
   checkFFmpeg,
   generateSprite,
-  getVideoDuration
+  getVideoDuration,
+  createVttFromJson
 };

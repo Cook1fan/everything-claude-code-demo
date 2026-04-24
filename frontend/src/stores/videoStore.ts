@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { Video, VideoData, ScanStatus, DirectoryTreeNode, SpriteInfo } from '@/types'
+import type { Video, VideoData, ScanStatus, DirectoryTreeNode, SpriteInfo, SpriteStatus, BatchSpriteStats } from '@/types'
 import * as indexedDB from '@/utils/indexedDB'
 
 const API_BASE = '/api'
@@ -25,6 +25,142 @@ export const useVideoStore = defineStore('video', () => {
   const currentPage = ref(1)
   const pageSize = 100
   const isInitialized = ref(false)
+
+  // 雪碧图生成状态 - 支持多个同时生成
+  const spriteInProgressSet = ref<Set<string>>(new Set())
+  const spriteStatusMap = ref<Map<string, SpriteStatus>>(new Map())
+
+  // 批量雪碧图生成状态
+  const batchSpriteInProgress = ref(false)
+  const batchSpriteStats = ref<BatchSpriteStats | null>(null)
+
+  let ws: WebSocket | null = null
+  let reconnectTimer: number | null = null
+
+  // 兼容旧的单个状态接口
+  const spriteInProgress = computed(() => spriteInProgressSet.value.size > 0)
+  const spriteStatus = computed(() => {
+    // 返回第一个状态或者 null
+    const firstStatus = Array.from(spriteStatusMap.value.values())[0]
+    return firstStatus || null
+  })
+
+  // 连接 WebSocket
+  function connectWebSocket() {
+    if (ws) return
+
+    // 开发环境直接连接后端端口，生产环境使用当前 host
+    const isDev = import.meta.env.DEV
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const host = isDev ? 'localhost:3000' : window.location.host
+    const wsUrl = `${protocol}//${host}`
+
+    try {
+      ws = new WebSocket(wsUrl)
+
+      ws.onopen = () => {
+        console.log('WebSocket 已连接')
+        if (reconnectTimer) {
+          clearTimeout(reconnectTimer)
+          reconnectTimer = null
+        }
+      }
+
+      ws.onmessage = async (event) => {
+        try {
+          const message = JSON.parse(event.data)
+          if (message.type === 'spriteStatus') {
+            // 不清空整个 Map，只更新收到的状态
+            const newInProgressSet = new Set<string>()
+            if (message.data.allStatus && Array.isArray(message.data.allStatus)) {
+              // 先添加/更新所有状态
+              for (const status of message.data.allStatus) {
+                if (status.videoPath) {
+                  spriteStatusMap.value.set(status.videoPath, status)
+                  if (status.percent != null && status.percent < 100 && !status.error) {
+                    newInProgressSet.add(status.videoPath)
+                  }
+                  // 保存到 IndexedDB
+                  try {
+                    await indexedDB.putSpriteTask(status)
+                  } catch (err) {
+                    console.error('保存雪碧图任务到 IndexedDB 失败:', err)
+                  }
+                }
+              }
+
+              // 统一清理：超过5个时优先删除最先完成的
+              const allStatuses = Array.from(spriteStatusMap.value.values())
+              if (allStatuses.length > 5) {
+                // 分成两组：已完成的和进行中的
+                const completed = allStatuses.filter(s =>
+                  (s.percent != null && s.percent >= 100) || s.error
+                )
+                const inProgress = allStatuses.filter(s =>
+                  s.percent != null && s.percent < 100 && !s.error
+                )
+
+                // 先对已完成的按完成时间排序（最老的在前）
+                completed.sort((a, b) => (a.updatedAt || a.createdAt || 0) - (b.updatedAt || b.createdAt || 0))
+
+                // 计算需要删除多少个
+                const needToDelete = allStatuses.length - 5
+
+                // 优先删除已完成的最老的
+                const toDelete = completed.slice(0, needToDelete)
+
+                // 如果已完成的不够删，则从进行中的删除最老的（理论上不应该发生）
+                if (toDelete.length < needToDelete) {
+                  inProgress.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
+                  toDelete.push(...inProgress.slice(0, needToDelete - toDelete.length))
+                }
+
+                // 执行删除
+                for (const status of toDelete) {
+                  if (status.videoPath) {
+                    spriteStatusMap.value.delete(status.videoPath)
+                  }
+                }
+              }
+            }
+            spriteInProgressSet.value = newInProgressSet
+          } else if (message.type === 'batchSpriteStatus') {
+            batchSpriteStats.value = message.data
+            batchSpriteInProgress.value = message.data.isRunning
+          }
+        } catch (err) {
+          console.error('解析 WebSocket 消息失败:', err)
+        }
+      }
+
+      ws.onclose = () => {
+        console.log('WebSocket 已断开，尝试重连...')
+        ws = null
+        // 5秒后重连
+        reconnectTimer = window.setTimeout(() => {
+          connectWebSocket()
+        }, 5000)
+      }
+
+      ws.onerror = (err) => {
+        console.error('WebSocket 错误:', err)
+      }
+    } catch (err) {
+      console.error('创建 WebSocket 连接失败:', err)
+    }
+  }
+
+  // 断开 WebSocket
+  function disconnectWebSocket() {
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
+    if (ws) {
+      ws.close()
+      ws = null
+    }
+  }
 
   // 从 IndexedDB 加载状态
   async function loadStateFromDB() {
@@ -57,10 +193,29 @@ export const useVideoStore = defineStore('video', () => {
     }
   }
 
+  // 从 IndexedDB 加载雪碧图任务
+  async function loadSpriteTasksFromDB() {
+    try {
+      const tasks = await indexedDB.getSpriteTasks()
+      for (const task of tasks) {
+        if (task.videoPath) {
+          spriteStatusMap.value.set(task.videoPath, task)
+          if (task.percent != null && task.percent < 100 && !task.error) {
+            spriteInProgressSet.value.add(task.videoPath)
+          }
+        }
+      }
+    } catch (err) {
+      console.error('从 IndexedDB 加载雪碧图任务失败:', err)
+    }
+  }
+
   // 初始化 store
   async function initialize() {
     if (isInitialized.value) return
     await loadStateFromDB()
+    await loadSpriteTasksFromDB()
+    connectWebSocket()
     isInitialized.value = true
   }
 
@@ -173,7 +328,6 @@ export const useVideoStore = defineStore('video', () => {
   function selectDirectory(path: string) {
     selectedDirectory.value = path
     currentPage.value = 1
-    expandToPath(path)
     saveStateToDB()
   }
 
@@ -296,6 +450,54 @@ export const useVideoStore = defineStore('video', () => {
     }
   }
 
+  async function batchGenerateSprites(videoPaths: string[], force: boolean = false, poolSize?: number) {
+    try {
+      const res = await fetch(`${API_BASE}/sprite/batch-generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paths: videoPaths, force, poolSize }),
+      })
+      return await res.json()
+    } catch (err) {
+      console.error('批量生成雪碧图失败:', err)
+      return { success: false, message: '请求失败' }
+    }
+  }
+
+  async function getBatchSpriteStatus() {
+    try {
+      const res = await fetch(`${API_BASE}/sprite/batch-status`)
+      return await res.json()
+    } catch (err) {
+      console.error('获取批量生成状态失败:', err)
+      return { isRunning: false, stats: null }
+    }
+  }
+
+  async function abortBatchSprites() {
+    try {
+      const res = await fetch(`${API_BASE}/sprite/batch-abort`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+      return await res.json()
+    } catch (err) {
+      console.error('中止批量生成失败:', err)
+      return { success: false, message: '请求失败' }
+    }
+  }
+
+  // 清除所有雪碧图任务
+  async function clearAllSpriteTasks() {
+    spriteStatusMap.value.clear()
+    spriteInProgressSet.value.clear()
+    try {
+      await indexedDB.clearSpriteTasks()
+    } catch (err) {
+      console.error('清除雪碧图任务失败:', err)
+    }
+  }
+
   function addToRecent(videoId: string) {
     const recent = recentVideos.value.filter(id => id !== videoId)
     recent.unshift(videoId)
@@ -336,6 +538,12 @@ export const useVideoStore = defineStore('video', () => {
     filteredVideos,
     totalPages,
     pagedVideos,
+    spriteInProgress,
+    spriteStatus,
+    spriteInProgressSet,
+    spriteStatusMap,
+    batchSpriteInProgress,
+    batchSpriteStats,
     initialize,
     toggleNode,
     isExpanded,
@@ -356,7 +564,13 @@ export const useVideoStore = defineStore('video', () => {
     generateSprite,
     getSpriteStatus,
     getSpriteInfo,
+    batchGenerateSprites,
+    getBatchSpriteStatus,
+    abortBatchSprites,
     addToRecent,
     formatFileSize,
+    connectWebSocket,
+    disconnectWebSocket,
+    clearAllSpriteTasks,
   }
 })

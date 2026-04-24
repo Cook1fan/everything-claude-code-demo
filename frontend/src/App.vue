@@ -6,7 +6,9 @@
         <p class="text-slate-400">加载中...</p>
       </div>
     </div>
-    <RouterView v-else />
+    <div v-else>
+      <RouterView />
+    </div>
   </div>
 </template>
 
@@ -22,6 +24,14 @@ const storesInitialized = ref(false)
 onMounted(async () => {
   await playHistory.initialize()
   await videoStore.initialize()
+  await videoStore.loadVideos()
+  await videoStore.getScanStatus()
+
+  // 定期更新扫描状态
+  setInterval(() => {
+    videoStore.getScanStatus()
+  }, 2000)
+
   storesInitialized.value = true
 })
 </script>

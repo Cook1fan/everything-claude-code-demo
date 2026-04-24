@@ -45,7 +45,7 @@ module.exports = {
       // 缩略图宽度（高度按比例计算）
       thumbnailWidth: 320,
       // 输出图片质量 (0-31, 31 是最低质量)
-      quality: 2,
+      quality: 3,
     }
   },
 

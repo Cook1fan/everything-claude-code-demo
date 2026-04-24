@@ -12,8 +12,6 @@ export const usePlayHistoryStore = defineStore('playHistory', () => {
 
   // 会话开始时记录的初始总时长
   let initialTotalTime = 0
-  // 暂停时已经播放的时长
-  let pausedAccumulatedTime = 0
 
   /**
    * 从 IndexedDB 加载数据到内存
@@ -81,7 +79,6 @@ export const usePlayHistoryStore = defineStore('playHistory', () => {
 
     // 记录当前的总时长
     initialTotalTime = playRecords.value.get(videoId)?.totalPlayTime || 0
-    pausedAccumulatedTime = 0
 
     currentSession.value = {
       videoId,
@@ -123,8 +120,6 @@ export const usePlayHistoryStore = defineStore('playHistory', () => {
     }
 
     if (currentSession.value) {
-      // 保存当前累计的时长
-      pausedAccumulatedTime = currentSession.value.accumulatedTime
       // 最后更新一次总时长
       const record = playRecords.value.get(currentSession.value.videoId)
       if (record) {
@@ -165,7 +160,6 @@ export const usePlayHistoryStore = defineStore('playHistory', () => {
         saveToDB(record)
       }
       currentSession.value = null
-      pausedAccumulatedTime = 0
     }
   }
 
@@ -262,6 +256,15 @@ export const usePlayHistoryStore = defineStore('playHistory', () => {
       }
       playRecords.value.set(videoId, newRecord)
       saveToDB(newRecord)
+    }
+  }
+
+  // 清除最后播放位置
+  function clearLastPlaybackPosition(videoId: string) {
+    const existing = playRecords.value.get(videoId)
+    if (existing) {
+      existing.lastPlaybackPosition = 0
+      saveToDB(existing)
     }
   }
 
@@ -395,6 +398,7 @@ export const usePlayHistoryStore = defineStore('playHistory', () => {
     setVideoDuration,
     getLastPlaybackPosition,
     setLastPlaybackPosition,
+    clearLastPlaybackPosition,
     getIsBadQuality,
     setIsBadQuality,
   }

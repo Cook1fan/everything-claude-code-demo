@@ -1,9 +1,10 @@
-import type { VideoPlayRecord } from '@/types'
+import type { VideoPlayRecord, SpriteStatus } from '@/types'
 
 const DB_NAME = 'video-player-db'
-const DB_VERSION = 2
+const DB_VERSION = 3
 const PLAY_HISTORY_STORE = 'playHistory'
 const APP_STATE_STORE = 'appState'
+const SPRITE_TASKS_STORE = 'spriteTasks'
 const LEGACY_STORAGE_KEY = 'video-play-history'
 
 export interface AppState {
@@ -71,6 +72,15 @@ export function openDB(): Promise<void> {
         if (!database.objectStoreNames.contains(APP_STATE_STORE)) {
           database.createObjectStore(APP_STATE_STORE, { keyPath: 'id' })
           console.log('IndexedDB 应用状态存储空间创建成功')
+        }
+      }
+
+      if (oldVersion < 3) {
+        // 版本 3: 添加雪碧图任务存储
+        if (!database.objectStoreNames.contains(SPRITE_TASKS_STORE)) {
+          const store = database.createObjectStore(SPRITE_TASKS_STORE, { keyPath: 'videoPath' })
+          store.createIndex('updatedAt', 'updatedAt', { unique: false })
+          console.log('IndexedDB 雪碧图任务存储空间创建成功')
         }
       }
     }
@@ -244,6 +254,75 @@ export async function putAppState(state: Partial<AppState>): Promise<void> {
 
   const clonedState = cloneForStorage(newState)
   await wrapRequest(store.put(clonedState))
+}
+
+// ===== 雪碧图任务相关操作 =====
+
+/**
+ * 保存或更新雪碧图任务（只保留最近5条）
+ */
+export async function putSpriteTask(task: SpriteStatus): Promise<void> {
+  await ensureDB()
+
+  // 在同一个事务中完成：读取现有数据 -> 清理旧数据 -> 保存新数据
+  const transaction = db!.transaction([SPRITE_TASKS_STORE], 'readwrite')
+  const store = transaction.objectStore(SPRITE_TASKS_STORE)
+
+  // 获取所有现有任务
+  const allTasks = await wrapRequest(store.getAll())
+
+  // 如果已经有5条或更多，删除最老的（按 createdAt 判断）
+  if (allTasks.length >= 5) {
+    // 按 createdAt 排序，最老的在前
+    allTasks.sort((a: SpriteStatus, b: SpriteStatus) => (a.createdAt || 0) - (b.createdAt || 0))
+    // 删除最老的（超出5条的部分）
+    const tasksToDelete = allTasks.slice(0, allTasks.length - 5)
+    for (const t of tasksToDelete) {
+      if (t.videoPath) {
+        store.delete(t.videoPath)
+      }
+    }
+  }
+
+  // 保存新任务，保留 createdAt，如果没有则设置
+  const taskWithTimestamp = {
+    ...task,
+    createdAt: task.createdAt || Date.now(),
+    updatedAt: Date.now()
+  }
+  const clonedTask = cloneForStorage(taskWithTimestamp)
+  await wrapRequest(store.put(clonedTask))
+}
+
+/**
+ * 获取所有雪碧图任务（按更新时间倒序，最多5个）
+ */
+export async function getSpriteTasks(): Promise<SpriteStatus[]> {
+  await ensureDB()
+  const store = getStore(SPRITE_TASKS_STORE, 'readonly')
+  const allTasks = await wrapRequest(store.getAll())
+  // 按 updatedAt 倒序排列，取最近5个
+  return allTasks
+    .sort((a: SpriteStatus, b: SpriteStatus) => (b.updatedAt || 0) - (a.updatedAt || 0))
+    .slice(0, 5)
+}
+
+/**
+ * 删除单个雪碧图任务
+ */
+export async function deleteSpriteTask(videoPath: string): Promise<void> {
+  await ensureDB()
+  const store = getStore(SPRITE_TASKS_STORE, 'readwrite')
+  await wrapRequest(store.delete(videoPath))
+}
+
+/**
+ * 清除所有雪碧图任务
+ */
+export async function clearSpriteTasks(): Promise<void> {
+  await ensureDB()
+  const store = getStore(SPRITE_TASKS_STORE, 'readwrite')
+  await wrapRequest(store.clear())
 }
 
 /**

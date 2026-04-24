@@ -42,3 +42,9 @@ body {
 .plyr--full-ui input[type=range] {
   color: #3b82f6;
 }
+
+/* Plyr 进度条缩略图 - 320x180 */
+.plyr__preview-thumb {
+  /* 320x180 原样显示，不缩放 */
+}
+

@@ -61,197 +61,124 @@ function isSystemDirectory(dirName) {
   return systemDirs.includes(dirName);
 }
 
-// 查找目录下的海报图片
-function findPosterInDir(dirPath) {
-  if (!fs.existsSync(dirPath)) {
-    return null;
+// 目录缓存信息
+class DirCache {
+  constructor() {
+    this.dirInfo = new Map(); // path -> { files, stat, posterPath }
   }
 
-  const files = fs.readdirSync(dirPath);
-  const posterFiles = files.filter(f => hasExtension(f, config.posterExtensions));
-
-  for (const posterName of config.posterNames) {
-    for (const file of posterFiles) {
-      const nameWithoutExt = path.basename(file, path.extname(file)).toLowerCase();
-      if (nameWithoutExt === posterName) {
-        return path.join(dirPath, file);
-      }
+  getDirInfo(dirPath) {
+    const normalized = normalizePath(dirPath);
+    let info = this.dirInfo.get(normalized);
+    if (!info) {
+      info = this._readDir(dirPath);
+      this.dirInfo.set(normalized, info);
     }
+    return info;
   }
 
-  if (posterFiles.length > 0) {
-    return path.join(dirPath, posterFiles[0]);
-  }
+  _readDir(dirPath) {
+    if (!fs.existsSync(dirPath)) {
+      return { files: [], hasPoster: false, posterPath: null };
+    }
 
-  return null;
-}
-
-// 查找目录下的雪碧图文件
-function findSpriteInDir(dirPath, videoFileName) {
-  if (!fs.existsSync(dirPath)) {
-    return null;
-  }
-
-  const baseName = path.basename(videoFileName, path.extname(videoFileName));
-  const expectedSpriteName = `${baseName}_sprite.jpg`;
-  const expectedSpritePath = path.join(dirPath, expectedSpriteName);
-
-  if (fs.existsSync(expectedSpritePath)) {
-    return expectedSpritePath;
-  }
-
-  return null;
-}
-
-// 检查目录是否有主图
-function hasPosterInDir(dirPath) {
-  if (!fs.existsSync(dirPath)) {
-    return false;
-  }
-
-  let files;
-  try {
-    files = fs.readdirSync(dirPath);
-  } catch (err) {
-    console.warn(`无法读取目录: ${dirPath}`, err.message);
-    return false;
-  }
-
-  const posterFiles = files.filter(f => hasExtension(f, config.posterExtensions));
-  return posterFiles.length > 0;
-}
-
-// 构建目录树
-function buildDirectoryTree(dirPath, hardDrive, parentPath = '') {
-  const treeNode = {
-    name: path.basename(dirPath) || hardDrive,
-    path: normalizePath(dirPath),
-    parentPath: parentPath,
-    children: [],
-    videoCount: 0,
-  };
-
-  if (!fs.existsSync(dirPath)) {
-    return treeNode;
-  }
-
-  // 跳过系统目录
-  const dirName = path.basename(dirPath);
-  if (isSystemDirectory(dirName)) {
-    return treeNode;
-  }
-
-  let files;
-  try {
-    files = fs.readdirSync(dirPath);
-  } catch (err) {
-    console.warn(`无法读取目录: ${dirPath}`, err.message);
-    return treeNode;
-  }
-
-  // 检查当前目录是否有视频
-  const hasVideos = files.some(f => hasExtension(f, config.videoExtensions));
-  if (hasVideos) {
-    treeNode.videoCount = 1;
-  }
-
-  // 检查当前目录是否有主图
-  const hasPoster = hasPosterInDir(dirPath);
-
-  // 递归处理子目录
-  for (const file of files) {
-    const fullPath = path.join(dirPath, file);
-    let stat;
+    let files;
     try {
-      stat = fs.statSync(fullPath);
+      files = fs.readdirSync(dirPath);
     } catch (err) {
-      continue;
+      console.warn(`无法读取目录: ${dirPath}`, err.message);
+      return { files: [], hasPoster: false, posterPath: null };
     }
 
-    if (stat.isDirectory() && config.recursive && !isSystemDirectory(file)) {
-      const childNode = buildDirectoryTree(fullPath, hardDrive, normalizePath(dirPath));
-      // 只保留有内容的子目录（有视频、有主图、或有子目录）
-      if (childNode.videoCount > 0 || hasPosterInDir(fullPath) || childNode.children.length > 0) {
-        treeNode.children.push(childNode);
-        treeNode.videoCount += childNode.videoCount;
+    // 查找海报
+    const posterFiles = files.filter(f => hasExtension(f, config.posterExtensions));
+    let posterPath = null;
+
+    if (posterFiles.length > 0) {
+      // 按优先级查找
+      for (const posterName of config.posterNames) {
+        for (const file of posterFiles) {
+          const nameWithoutExt = path.basename(file, path.extname(file)).toLowerCase();
+          if (nameWithoutExt === posterName) {
+            posterPath = path.join(dirPath, file);
+            break;
+          }
+        }
+        if (posterPath) break;
+      }
+      // 如果没找到优先名称，用第一个
+      if (!posterPath) {
+        posterPath = path.join(dirPath, posterFiles[0]);
       }
     }
-  }
 
-  // 按名称排序子目录
-  treeNode.children.sort((a, b) => a.name.localeCompare(b.name));
-
-  return treeNode;
-}
-
-// 统计目录下的视频数量
-function countVideosInDirectory(dirPath, videoCountMap) {
-  if (!fs.existsSync(dirPath)) {
-    return;
-  }
-
-  // 跳过系统目录
-  const dirName = path.basename(dirPath);
-  if (isSystemDirectory(dirName)) {
-    return;
-  }
-
-  let files;
-  try {
-    files = fs.readdirSync(dirPath);
-  } catch (err) {
-    return;
-  }
-
-  const videoFiles = files.filter(f => hasExtension(f, config.videoExtensions));
-  const normalizedDirPath = normalizePath(dirPath);
-  videoCountMap[normalizedDirPath] = (videoCountMap[normalizedDirPath] || 0) + videoFiles.length;
-
-  if (config.recursive) {
-    for (const file of files) {
-      const fullPath = path.join(dirPath, file);
-      let stat;
-      try {
-        stat = fs.statSync(fullPath);
-      } catch (err) {
-        continue;
-      }
-      if (stat.isDirectory() && !isSystemDirectory(file)) {
-        countVideosInDirectory(fullPath, videoCountMap);
-      }
-    }
+    return {
+      files,
+      hasPoster: posterFiles.length > 0,
+      posterPath
+    };
   }
 }
 
-// 扫描单个目录，收集视频
-function scanDirectory(dirPath, hardDrive, results, videoCountMap) {
-  if (!fs.existsSync(dirPath)) {
-    console.warn(`目录不存在: ${dirPath}`);
-    return;
+// 性能计时器
+class PerfTimer {
+  constructor() {
+    this.startTime = Date.now();
+    this.lastTime = this.startTime;
+    this.metrics = new Map();
   }
 
-  // 跳过系统目录
+  step(label) {
+    const now = Date.now();
+    const elapsed = now - this.lastTime;
+    const totalElapsed = now - this.startTime;
+    this.lastTime = now;
+
+    const current = this.metrics.get(label) || { count: 0, total: 0 };
+    current.count++;
+    current.total += elapsed;
+    this.metrics.set(label, current);
+
+    return { elapsed, totalElapsed };
+  }
+
+  report() {
+    console.log('\n=== 性能报告 ===');
+    for (const [label, data] of this.metrics) {
+      console.log(`  ${label}: ${data.count}次, 总计${data.total}ms, 平均${(data.total / data.count).toFixed(1)}ms`);
+    }
+    console.log(`  总计: ${Date.now() - this.startTime}ms`);
+    console.log('================\n');
+  }
+}
+
+let globalPerf = null;
+let dirScanCount = 0;
+let videoProcessCount = 0;
+
+// 单次遍历收集所有信息
+function scanDirectoryRecursive(dirPath, hardDrive, dirCache, results) {
   const dirName = path.basename(dirPath);
   if (isSystemDirectory(dirName)) {
-    return;
+    return null;
   }
 
-  const stat = fs.statSync(dirPath);
-  if (!stat.isDirectory()) {
-    return;
+  dirScanCount++;
+  if (dirScanCount % 100 === 0) {
+    const perf = globalPerf.step('scan_100_dirs');
+    console.log(`  已扫描 ${dirScanCount} 个目录, ${videoProcessCount} 个视频 (+${perf.elapsed}ms)`);
   }
 
-  let files;
-  try {
-    files = fs.readdirSync(dirPath);
-  } catch (err) {
-    console.warn(`无法读取目录: ${dirPath}`, err.message);
-    return;
+  const dirInfo = dirCache.getDirInfo(dirPath);
+  if (!dirInfo.files) {
+    return null;
   }
 
-  const videoFiles = files.filter(f => hasExtension(f, config.videoExtensions));
   const normalizedDirPath = normalizePath(dirPath);
-  const videoCountInDir = videoCountMap[normalizedDirPath] || 0;
+
+  // 收集当前目录的视频
+  const videoFiles = dirInfo.files.filter(f => hasExtension(f, config.videoExtensions));
+  const videoCountInDir = videoFiles.length;
 
   for (const videoFile of videoFiles) {
     const videoPath = path.join(dirPath, videoFile);
@@ -267,53 +194,102 @@ function scanDirectory(dirPath, hardDrive, results, videoCountMap) {
       continue;
     }
 
-    const posterPath = findPosterInDir(dirPath);
-    const spritePath = findSpriteInDir(dirPath, videoFile);
+    // 查找雪碧图（扫描时不自动生成 VTT，避免卡顿）
+    const baseName = path.basename(videoFile, path.extname(videoFile));
+    const expectedSpriteName = `${baseName}_sprite.jpg`;
+    const expectedSpritePath = path.join(dirPath, expectedSpriteName);
+    const spritePath = fs.existsSync(expectedSpritePath) ? expectedSpritePath : null;
+
+    let spriteVttPath = null;
+    if (spritePath) {
+      const expectedVttName = `${baseName}_sprite.vtt`;
+      const expectedVttPath = path.join(dirPath, expectedVttName);
+      if (fs.existsSync(expectedVttPath)) {
+        spriteVttPath = expectedVttPath;
+      }
+      // 注意：扫描时不自动生成 VTT，需要时在前端或单独生成
+    }
 
     const video = {
       id: generateId(videoPath),
       title: getTitleFromPath(videoPath, videoCountInDir),
-      directory: normalizePath(dirPath),
+      directory: normalizedDirPath,
       hardDrive: hardDrive,
       videoPath: normalizePath(videoPath),
-      posterPath: posterPath ? normalizePath(posterPath) : undefined,
+      posterPath: dirInfo.posterPath ? normalizePath(dirInfo.posterPath) : undefined,
       spritePath: spritePath ? normalizePath(spritePath) : undefined,
+      spriteVttPath: spriteVttPath ? normalizePath(spriteVttPath) : undefined,
       videoExtension: path.extname(videoFile).toLowerCase(),
-      posterExtension: posterPath ? path.extname(posterPath) : undefined,
+      posterExtension: dirInfo.posterPath ? path.extname(dirInfo.posterPath) : undefined,
       fileSize: videoStat.size,
       createdAt: videoStat.birthtimeMs,
       updatedAt: videoStat.mtimeMs,
     };
 
     results.videos.push(video);
+    videoProcessCount++;
 
-    if (!results.directories.includes(normalizePath(dirPath))) {
-      results.directories.push(normalizePath(dirPath));
+    if (!results.directories.includes(normalizedDirPath)) {
+      results.directories.push(normalizedDirPath);
     }
   }
 
-  if (config.recursive) {
-    for (const file of files) {
-      const fullPath = path.join(dirPath, file);
-      let stat;
-      try {
-        stat = fs.statSync(fullPath);
-      } catch (err) {
-        continue;
-      }
-      if (stat.isDirectory() && !isSystemDirectory(file)) {
-        scanDirectory(fullPath, hardDrive, results, videoCountMap);
+  // 构建目录树节点
+  const treeNode = {
+    name: dirName || hardDrive,
+    path: normalizedDirPath,
+    parentPath: '',
+    children: [],
+    videoCount: videoCountInDir > 0 ? 1 : 0,
+  };
+
+  // 递归处理子目录
+  for (const file of dirInfo.files) {
+    const fullPath = path.join(dirPath, file);
+    let stat;
+    try {
+      stat = fs.statSync(fullPath);
+    } catch (err) {
+      continue;
+    }
+
+    if (stat.isDirectory() && config.recursive && !isSystemDirectory(file)) {
+      const childCache = dirCache.getDirInfo(fullPath);
+      const childNode = scanDirectoryRecursive(fullPath, hardDrive, dirCache, results);
+      if (childNode) {
+        childNode.parentPath = normalizedDirPath;
+        // 只保留有内容的子目录
+        const childHasVideos = childNode.videoCount > 0;
+        const childHasPoster = childCache.hasPoster;
+        const childHasChildren = childNode.children.length > 0;
+        if (childHasVideos || childHasPoster || childHasChildren) {
+          treeNode.children.push(childNode);
+          treeNode.videoCount += childNode.videoCount;
+        }
       }
     }
   }
+
+  // 按名称排序子目录
+  treeNode.children.sort((a, b) => a.name.localeCompare(b.name));
+
+  return treeNode;
 }
 
 // 主扫描函数
 function scan() {
+  globalPerf = new PerfTimer();
+  dirScanCount = 0;
+  videoProcessCount = 0;
+
+  console.log('\n========================================');
   console.log('开始扫描...');
+  console.log('开始时间:', new Date().toLocaleString());
   console.log('配置的硬盘:', config.hardDrives);
+  console.log('========================================\n');
 
   ensureDataDir();
+  globalPerf.step('ensureDataDir');
 
   const results = {
     version: '2.0.0',
@@ -324,44 +300,56 @@ function scan() {
     videos: [],
   };
 
-  // 首先统计每个目录下的视频数量
-  const videoCountMap = {};
-  for (const hardDrive of config.hardDrives) {
-    if (fs.existsSync(hardDrive)) {
-      countVideosInDirectory(hardDrive, videoCountMap);
-    }
-  }
+  const dirCache = new DirCache();
+  globalPerf.step('init_data_structures');
 
   for (const hardDrive of config.hardDrives) {
     if (!fs.existsSync(hardDrive)) {
       console.warn(`硬盘不存在或未挂载: ${hardDrive}`);
       continue;
     }
-    console.log(`正在扫描: ${hardDrive}`);
+    console.log(`\n---------- 扫描硬盘: ${hardDrive} ----------`);
+    const driveStart = Date.now();
 
-    const tree = buildDirectoryTree(hardDrive, hardDrive);
-    // 只添加有内容的根目录（有视频、有主图、或有子目录）
-    const rootHasPoster = hasPosterInDir(hardDrive);
-    if (tree.videoCount > 0 || rootHasPoster || tree.children.length > 0) {
+    const tree = scanDirectoryRecursive(hardDrive, hardDrive, dirCache, results);
+    const rootCache = dirCache.getDirInfo(hardDrive);
+    if (tree && (tree.videoCount > 0 || rootCache.hasPoster || tree.children.length > 0)) {
       results.directoryTree.push(tree);
     }
 
-    scanDirectory(hardDrive, hardDrive, results, videoCountMap);
+    console.log(`  硬盘 ${hardDrive} 扫描完成, 耗时 ${Date.now() - driveStart}ms`);
+    globalPerf.step(`scan_drive_${hardDrive}`);
   }
 
+  console.log('\n---------- 排序视频 ----------');
+  const sortStart = Date.now();
   results.videos.sort((a, b) => {
     if (a.directory !== b.directory) {
       return a.directory.localeCompare(b.directory);
     }
     return a.title.localeCompare(b.title);
   });
+  console.log(`  排序完成, 耗时 ${Date.now() - sortStart}ms`);
+  globalPerf.step('sort_videos');
 
-  fs.writeFileSync(config.outputPath, JSON.stringify(results, null, 2), 'utf-8');
+  console.log('\n---------- 写入文件 ----------');
+  const writeStart = Date.now();
+  console.log(`  写入路径: ${config.outputPath}`);
+  const jsonString = JSON.stringify(results);
+  console.log(`  数据大小: ~${(jsonString.length / 1024 / 1024).toFixed(2)}MB`);
+  fs.writeFileSync(config.outputPath, jsonString, 'utf-8');
+  console.log(`  写入完成, 耗时 ${Date.now() - writeStart}ms`);
+  globalPerf.step('write_file');
 
+  console.log('\n========================================');
   console.log(`扫描完成!`);
+  console.log(`结束时间: ${new Date().toLocaleString()}`);
   console.log(`- 找到 ${results.videos.length} 个视频`);
-  console.log(`- 涉及 ${results.directories.length} 个目录`);
+  console.log(`- 扫描 ${dirScanCount} 个目录`);
+  console.log(`- 涉及 ${results.directories.length} 个有视频的目录`);
+  console.log(`- 目录缓存: ${dirCache.dirInfo.size} 个目录`);
   console.log(`- 数据已保存到: ${config.outputPath}`);
+  globalPerf.report();
 
   return results;
 }

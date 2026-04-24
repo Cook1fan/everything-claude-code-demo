@@ -1,42 +1,6 @@
 <template>
-  <div class="flex flex-col h-screen">
-    <!-- 顶部导航栏 -->
-    <header class="bg-slate-800 border-b border-slate-700 px-6 py-4">
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-4">
-          <h1 class="text-2xl font-bold text-white">
-            🎬 视频浏览器
-          </h1>
-          <button
-            @click="goToHistory"
-            class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors flex items-center gap-2"
-          >
-            📊 播放历史
-          </button>
-        </div>
-        <div class="flex items-center gap-4">
-          <div v-if="store.scanning" class="flex items-center gap-2 text-yellow-400">
-            <div class="w-4 h-4 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin"></div>
-            <span>正在扫描...</span>
-          </div>
-          <div v-else class="text-sm text-slate-400">
-            {{ store.videoCount }} 个视频
-            <span v-if="store.lastScan" class="ml-2">
-              (最后扫描: {{ formatTime(store.lastScan) }})
-            </span>
-          </div>
-          <button
-            @click="handleScan"
-            :disabled="store.scanning"
-            class="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-600 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
-          >
-            🔄 重新扫描
-          </button>
-        </div>
-      </div>
-    </header>
-
-    <div class="flex flex-1 overflow-hidden">
+  <AppLayout>
+    <div class="flex h-full overflow-hidden">
       <!-- 侧边栏 -->
       <aside class="w-72 bg-slate-800 border-r border-slate-700 p-4 overflow-y-auto flex flex-col">
         <!-- 搜索框 -->
@@ -234,7 +198,7 @@
         ↓
       </button>
     </div>
-  </div>
+  </AppLayout>
 </template>
 
 <script setup lang="ts">
@@ -244,6 +208,7 @@ import { useVideoStore } from '@/stores/videoStore'
 import { usePlayHistoryStore } from '@/stores/playHistoryStore'
 import VideoCard from '@/components/VideoCard.vue'
 import DirectoryTree from '@/components/DirectoryTree.vue'
+import AppLayout from '@/components/AppLayout.vue'
 
 const store = useVideoStore()
 const playHistory = usePlayHistoryStore()
@@ -313,13 +278,8 @@ function scrollToBottom() {
   }
 }
 
-onMounted(async () => {
-  await store.loadVideos()
-  await store.getScanStatus()
-
-  setInterval(() => {
-    store.getScanStatus()
-  }, 2000)
+onMounted(() => {
+  // 视频加载和状态更新已在 App.vue 中处理
 })
 
 async function handleScan() {
@@ -334,17 +294,8 @@ function playVideo(video: any) {
   router.push({ name: 'video', params: { id: video.id } })
 }
 
-function goToHistory() {
-  router.push({ name: 'history' })
-}
-
 function getDirectoryName(path: string) {
   const parts = path.split('/')
   return parts[parts.length - 1] || path
-}
-
-function formatTime(timestamp: number) {
-  const date = new Date(timestamp)
-  return date.toLocaleString('zh-CN')
 }
 </script>

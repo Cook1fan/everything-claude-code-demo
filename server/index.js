@@ -4,11 +4,181 @@ const path = require('path');
 const { exec } = require('child_process');
 const { scan } = require('../scanner/scan');
 const { checkFFmpeg, generateSprite } = require('../scanner/spriteGenerator');
+const SpriteThreadPool = require('../scanner/spriteThreadPool');
 const config = require('../scanner/config');
 const fs = require('fs');
+const http = require('http');
+const WebSocket = require('ws');
 
 const app = express();
 const PORT = 3000;
+const server = http.createServer(app);
+const wss = new WebSocket.Server({ server });
+
+// ========== 缓存系统 ==========
+let videoDataCache = null;
+let videoDataCacheTime = 0;
+const CACHE_TTL = 5000; // 5秒缓存
+
+// 带缓存的视频数据读取
+function getVideoData() {
+  const now = Date.now();
+  if (videoDataCache && (now - videoDataCacheTime) < CACHE_TTL) {
+    return videoDataCache;
+  }
+  try {
+    const dataPath = path.resolve(config.outputPath);
+    if (fs.existsSync(dataPath)) {
+      const data = JSON.parse(fs.readFileSync(dataPath, 'utf-8'));
+      videoDataCache = data;
+      videoDataCacheTime = now;
+      return data;
+    }
+  } catch (err) {
+    console.error('读取视频数据失败:', err);
+  }
+  return null;
+}
+
+// 清除视频数据缓存
+function clearVideoDataCache() {
+  videoDataCache = null;
+  videoDataCacheTime = 0;
+}
+
+// WebSocket 广播节流
+let broadcastTimeout = null;
+let pendingBroadcast = false;
+
+// WebSocket 连接管理
+const clients = new Set();
+
+wss.on('connection', (ws) => {
+  clients.add(ws);
+  console.log('WebSocket 客户端已连接');
+
+  // 发送当前状态给新连接的客户端
+  sendSpriteStatusToClient(ws);
+
+  ws.on('close', () => {
+    clients.delete(ws);
+    console.log('WebSocket 客户端已断开');
+  });
+});
+
+// 节流的雪碧图状态广播（最多每100ms一次）
+function broadcastSpriteStatus() {
+  if (broadcastTimeout) {
+    pendingBroadcast = true;
+    return;
+  }
+
+  doBroadcast();
+
+  broadcastTimeout = setTimeout(() => {
+    broadcastTimeout = null;
+    if (pendingBroadcast) {
+      pendingBroadcast = false;
+      doBroadcast();
+    }
+  }, 100);
+}
+
+function doBroadcast() {
+  const allStatus = Array.from(spriteGenerationStatusMap.values());
+  const message = JSON.stringify({
+    type: 'spriteStatus',
+    data: {
+      inProgress: spriteGenerationInProgressSet.size > 0,
+      allStatus: allStatus
+    }
+  });
+  clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(message);
+    }
+  });
+}
+
+// 广播批量雪碧图生成状态
+function broadcastBatchSpriteStatus(stats) {
+  const message = JSON.stringify({
+    type: 'batchSpriteStatus',
+    data: stats
+  });
+  clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(message);
+    }
+  });
+}
+
+// 发送雪碧图状态给单个客户端
+function sendSpriteStatusToClient(ws) {
+  const allStatus = Array.from(spriteGenerationStatusMap.values());
+  const message = JSON.stringify({
+    type: 'spriteStatus',
+    data: {
+      inProgress: spriteGenerationInProgressSet.size > 0,
+      allStatus: allStatus
+    }
+  });
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send(message);
+  }
+
+  // 如果有批量任务在运行，也发送批量状态
+  if (batchThreadPool) {
+    const batchMessage = JSON.stringify({
+      type: 'batchSpriteStatus',
+      data: batchThreadPool.getStats()
+    });
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(batchMessage);
+    }
+  }
+}
+
+// 视频路径到信息的内存缓存
+let videoInfoCache = new Map();
+
+// 根据视频路径获取视频标题（带缓存）
+function getVideoTitleByPath(videoPath) {
+  const normalizedPath = normalizePath(videoPath);
+  const cached = videoInfoCache.get(normalizedPath);
+  if (cached && cached.title) {
+    return cached.title;
+  }
+
+  const data = getVideoData();
+  if (data && data.videos) {
+    const video = data.videos.find(v => normalizePath(v.videoPath) === normalizedPath);
+    if (video) {
+      videoInfoCache.set(normalizedPath, { title: video.title, id: video.id });
+      return video.title;
+    }
+  }
+  return null;
+}
+
+// 根据视频路径获取视频ID（带缓存）
+function getVideoIdByPath(videoPath) {
+  const normalizedPath = normalizePath(videoPath);
+  const cached = videoInfoCache.get(normalizedPath);
+  if (cached && cached.id) {
+    return cached.id;
+  }
+
+  const data = getVideoData();
+  if (data && data.videos) {
+    const video = data.videos.find(v => normalizePath(v.videoPath) === normalizedPath);
+    if (video) {
+      videoInfoCache.set(normalizedPath, { title: video.title, id: video.id });
+      return video.id;
+    }
+  }
+  return null;
+}
 
 // 中间件
 app.use(cors());
@@ -37,12 +207,26 @@ function ensureDataFile() {
   }
 }
 
-// API: 获取视频数据
+// API: 获取视频数据（带缓存）
 app.get('/api/videos', (req, res) => {
   try {
-    const dataPath = path.resolve(config.outputPath);
     ensureDataFile();
-    const data = JSON.parse(fs.readFileSync(dataPath, 'utf-8'));
+    const data = getVideoData() || JSON.parse(fs.readFileSync(path.resolve(config.outputPath), 'utf-8'));
+
+    // 自动补全 spriteVttPath（根据 spritePath 推断）
+    if (data.videos && Array.isArray(data.videos)) {
+      data.videos = data.videos.map(video => {
+        if (video.spritePath && !video.spriteVttPath) {
+          const vttPath = video.spritePath.replace(/\.(jpg|jpeg|png)$/, '.vtt');
+          return {
+            ...video,
+            spriteVttPath: vttPath
+          };
+        }
+        return video;
+      });
+    }
+
     res.json(data);
   } catch (err) {
     console.error('读取视频数据失败:', err);
@@ -63,6 +247,8 @@ app.post('/api/scan', (req, res) => {
   setTimeout(() => {
     try {
       lastScanResult = scan();
+      clearVideoDataCache();
+      videoInfoCache.clear();
     } catch (err) {
       console.error('扫描出错:', err);
     } finally {
@@ -178,7 +364,7 @@ app.get('/api/video', (req, res) => {
   }
 });
 
-// API: 提供图片文件访问
+// API: 提供图片文件访问（带缓存）
 app.get('/api/image', (req, res) => {
   const filePath = req.query.path;
   if (!filePath) {
@@ -198,9 +384,16 @@ app.get('/api/image', (req, res) => {
   else if (ext === '.vtt') contentType = 'text/vtt; charset=utf-8';
   else if (ext === '.json') contentType = 'application/json; charset=utf-8';
 
-  res.writeHead(200, {
+  // 图片文件缓存1小时，VTT和JSON不缓存
+  const isCacheable = ['.jpg', '.jpeg', '.png', '.webp', '.gif'].includes(ext);
+  const headers = {
     'Content-Type': contentType,
-  });
+  };
+  if (isCacheable) {
+    headers['Cache-Control'] = 'public, max-age=3600';
+  }
+
+  res.writeHead(200, headers);
   const stream = fs.createReadStream(resolvedPath);
   stream.pipe(res);
 });
@@ -318,11 +511,14 @@ app.get('/api/ffmpeg/status', async (req, res) => {
 });
 
 
-// 雪碧图生成状态
-let spriteGenerationInProgress = false;
-let spriteGenerationStatus = null;
+// 雪碧图生成状态 - 支持多个同时生成
+const spriteGenerationInProgressSet = new Set();
+const spriteGenerationStatusMap = new Map();
 
-// API: 生成雪碧图
+// 批量雪碧图生成状态
+let batchThreadPool = null;
+
+// API: 生成雪碧图（支持多个同时生成）
 app.post('/api/sprite/generate', async (req, res) => {
   const videoPath = req.body.path;
   const force = req.body.force || false;
@@ -335,10 +531,6 @@ app.post('/api/sprite/generate', async (req, res) => {
     return res.status(404).json({ error: '视频文件不存在' });
   }
 
-  if (spriteGenerationInProgress) {
-    return res.json({ success: false, message: '正在生成其他雪碧图，请稍候...' });
-  }
-
   // 检查 FFmpeg
   const ffmpegStatus = await checkFFmpeg();
   if (!ffmpegStatus.available) {
@@ -348,8 +540,67 @@ app.post('/api/sprite/generate', async (req, res) => {
     });
   }
 
-  spriteGenerationInProgress = true;
-  spriteGenerationStatus = { videoPath: resolvedPath, progress: 0, message: '开始生成...' };
+  // 如果这个视频已经在生成中，不重复生成
+  if (spriteGenerationInProgressSet.has(resolvedPath)) {
+    return res.json({ success: false, message: '这个视频正在生成中' });
+  }
+
+  // 检查正在运行的任务数量，最多5个
+  const inProgressCount = spriteGenerationInProgressSet.size;
+  if (inProgressCount >= 5) {
+    return res.json({ success: false, message: '正在生成的任务已达5个，请稍后再试' });
+  }
+
+  // 确保最多5个任务，超过就删除最先完成的（优先删除已完成的）
+  const allStatuses = Array.from(spriteGenerationStatusMap.values());
+  if (allStatuses.length >= 5) {
+    // 分成已完成和进行中
+    const completedStatuses = allStatuses.filter(s =>
+      s.videoPath && !spriteGenerationInProgressSet.has(s.videoPath)
+    );
+    const inProgressStatuses = allStatuses.filter(s =>
+      s.videoPath && spriteGenerationInProgressSet.has(s.videoPath)
+    );
+
+    // 优先删除已完成的，按完成时间（updatedAt）从老到新
+    completedStatuses.sort((a, b) => (a.updatedAt || a.createdAt || 0) - (b.updatedAt || b.createdAt || 0));
+    let needToDelete = allStatuses.length - 5 + 1; // 腾位置给新任务，保持最多5个（现有5个+新1个=6个，删1个）
+    for (const status of completedStatuses) {
+      if (needToDelete <= 0) break;
+      if (status.videoPath) {
+        spriteGenerationStatusMap.delete(status.videoPath);
+        needToDelete--;
+      }
+    }
+
+    // 如果还需要删除，就连进行中的一起删（最老的）
+    if (needToDelete > 0) {
+      inProgressStatuses.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+      for (const status of inProgressStatuses) {
+        if (needToDelete <= 0) break;
+        if (status.videoPath) {
+          spriteGenerationStatusMap.delete(status.videoPath);
+          spriteGenerationInProgressSet.delete(status.videoPath);
+          needToDelete--;
+        }
+      }
+    }
+  }
+
+  // 标记为生成中
+  spriteGenerationInProgressSet.add(resolvedPath);
+  const initialStatus = {
+    videoPath: resolvedPath,
+    videoId: getVideoIdByPath(resolvedPath),
+    videoTitle: getVideoTitleByPath(resolvedPath),
+    percent: 0,
+    message: '开始生成...',
+    createdAt: Date.now()
+  };
+  spriteGenerationStatusMap.set(resolvedPath, initialStatus);
+
+  // 广播状态 - 发送所有正在生成的状态
+  broadcastSpriteStatus();
 
   res.json({ success: true, message: '雪碧图生成已开始' });
 
@@ -357,14 +608,22 @@ app.post('/api/sprite/generate', async (req, res) => {
   (async () => {
     try {
       const result = await generateSprite(resolvedPath, { force }, (progress) => {
-        spriteGenerationStatus = {
+        const existingStatus = spriteGenerationStatusMap.get(resolvedPath);
+        const status = {
           videoPath: resolvedPath,
+          videoId: getVideoIdByPath(resolvedPath),
+          videoTitle: getVideoTitleByPath(resolvedPath),
           percent: progress.percent || 0,
           message: progress.message || '处理中...',
           stage: progress.stage,
           frameCount: progress.frameCount,
-          totalFrames: progress.totalFrames
+          totalFrames: progress.totalFrames,
+          createdAt: existingStatus?.createdAt || Date.now(),
+          updatedAt: Date.now()
         };
+        spriteGenerationStatusMap.set(resolvedPath, status);
+        console.log('进度更新:', path.basename(resolvedPath), status.percent + '%', status.message);
+        broadcastSpriteStatus();
       });
 
       // 更新 videos.json 添加雪碧图路径和 VTT 路径
@@ -377,40 +636,55 @@ app.post('/api/sprite/generate', async (req, res) => {
           const vttPath = result.spritePath.replace(/\.(jpg|jpeg|png)$/, '.vtt');
           data.videos[videoIndex].spriteVttPath = normalizePath(vttPath);
           fs.writeFileSync(dataPath, JSON.stringify(data, null, 2), 'utf-8');
+          clearVideoDataCache();
         }
       }
 
-      spriteGenerationStatus = {
+      const existingStatus = spriteGenerationStatusMap.get(resolvedPath);
+      const finalStatus = {
         ...result,
+        videoPath: resolvedPath,
+        videoId: getVideoIdByPath(resolvedPath),
+        videoTitle: getVideoTitleByPath(resolvedPath),
         percent: 100,
-        message: '生成完成!'
+        createdAt: existingStatus?.createdAt || Date.now(),
+        updatedAt: Date.now()
       };
+      spriteGenerationStatusMap.set(resolvedPath, finalStatus);
+      broadcastSpriteStatus();
 
       // 等待1秒，确保前端收到最后的100%更新
       await new Promise(resolve => setTimeout(resolve, 1000));
     } catch (err) {
       console.error('生成雪碧图失败:', err);
-      spriteGenerationStatus = {
+      const existingStatus = spriteGenerationStatusMap.get(resolvedPath);
+      const errorStatus = {
         error: true,
-        message: '生成失败: ' + err.message
+        videoPath: resolvedPath,
+        videoId: getVideoIdByPath(resolvedPath),
+        videoTitle: getVideoTitleByPath(resolvedPath),
+        message: '生成失败: ' + err.message,
+        createdAt: existingStatus?.createdAt || Date.now(),
+        updatedAt: Date.now()
       };
+      spriteGenerationStatusMap.set(resolvedPath, errorStatus);
+      broadcastSpriteStatus();
     } finally {
-      spriteGenerationInProgress = false;
-      // 5分钟后清理状态
-      setTimeout(() => {
-        if (spriteGenerationStatus && !spriteGenerationInProgress) {
-          spriteGenerationStatus = null;
-        }
-      }, 5 * 60 * 1000);
+      spriteGenerationInProgressSet.delete(resolvedPath);
+      broadcastSpriteStatus();
     }
   })();
 });
 
 // API: 获取雪碧图生成状态
 app.get('/api/sprite/status', (req, res) => {
+  const allStatus = Array.from(spriteGenerationStatusMap.values()).map(status => ({
+    ...status,
+    videoTitle: status.videoTitle || (status.videoPath ? getVideoTitleByPath(status.videoPath) : undefined)
+  }));
   res.json({
-    inProgress: spriteGenerationInProgress,
-    status: spriteGenerationStatus
+    inProgress: spriteGenerationInProgressSet.size > 0,
+    allStatus: allStatus
   });
 });
 
@@ -436,6 +710,133 @@ app.get('/api/sprite/info', (req, res) => {
   }
 });
 
+// API: 批量生成雪碧图
+app.post('/api/sprite/batch-generate', async (req, res) => {
+  const videoPaths = req.body.paths;
+  const force = req.body.force || false;
+  const poolSize = req.body.poolSize;
+
+  if (!videoPaths || !Array.isArray(videoPaths) || videoPaths.length === 0) {
+    return res.status(400).json({ error: '缺少 paths 参数或为空数组' });
+  }
+
+  const batchIsRunning = batchThreadPool && batchThreadPool.isRunning === true;
+  if (spriteGenerationInProgress || batchIsRunning) {
+    return res.json({ success: false, message: '正在生成其他雪碧图，请稍候...' });
+  }
+
+  // 检查 FFmpeg
+  const ffmpegStatus = await checkFFmpeg();
+  if (!ffmpegStatus.available) {
+    return res.json({
+      success: false,
+      message: ffmpegStatus.message || 'FFmpeg 不可用'
+    });
+  }
+
+  // 验证视频文件存在
+  const validPaths = [];
+  for (const videoPath of videoPaths) {
+    const resolvedPath = path.resolve(videoPath);
+    if (fs.existsSync(resolvedPath)) {
+      validPaths.push(resolvedPath);
+    }
+  }
+
+  if (validPaths.length === 0) {
+    return res.json({ success: false, message: '没有有效的视频文件' });
+  }
+
+  // 创建线程池
+  batchThreadPool = new SpriteThreadPool({ poolSize });
+  batchThreadPool.addVideos(validPaths, { force });
+
+  // 注册事件监听
+  batchThreadPool.on('start', (data) => {
+    console.log('[批量生成] 开始:', data);
+    broadcastBatchSpriteStatus(batchThreadPool.getStats());
+  });
+
+  batchThreadPool.on('progress', (data) => {
+    broadcastBatchSpriteStatus({
+      ...batchThreadPool.getStats(),
+      currentVideo: data
+    });
+  });
+
+  batchThreadPool.on('videoComplete', async (data) => {
+    console.log('[批量生成] 视频完成:', path.basename(data.videoPath));
+
+    // 更新 videos.json
+    if (data.success && data.spritePath) {
+      const dataPath = path.resolve(config.outputPath);
+      if (fs.existsSync(dataPath)) {
+        try {
+          const videoData = JSON.parse(fs.readFileSync(dataPath, 'utf-8'));
+          const videoIndex = videoData.videos.findIndex(v => normalizePath(v.videoPath) === normalizePath(data.videoPath));
+          if (videoIndex !== -1) {
+            videoData.videos[videoIndex].spritePath = normalizePath(data.spritePath);
+            const vttPath = data.spritePath.replace(/\.(jpg|jpeg|png)$/, '.vtt');
+            videoData.videos[videoIndex].spriteVttPath = normalizePath(vttPath);
+            fs.writeFileSync(dataPath, JSON.stringify(videoData, null, 2), 'utf-8');
+            clearVideoDataCache();
+          }
+        } catch (err) {
+          console.error('更新 videos.json 失败:', err);
+        }
+      }
+    }
+
+    broadcastBatchSpriteStatus(batchThreadPool.getStats());
+  });
+
+  batchThreadPool.on('videoError', (data) => {
+    console.error('[批量生成] 视频失败:', path.basename(data.videoPath), data.error);
+    broadcastBatchSpriteStatus(batchThreadPool.getStats());
+  });
+
+  batchThreadPool.on('done', (data) => {
+    console.log('[批量生成] 完成:', data.stats);
+    broadcastBatchSpriteStatus({ ...data.stats, done: true });
+
+    // 立即清理线程池引用
+    batchThreadPool = null;
+  });
+
+  // 启动处理
+  batchThreadPool.start();
+
+  res.json({
+    success: true,
+    message: `批量生成已开始，共 ${validPaths.length} 个视频`,
+    total: validPaths.length
+  });
+});
+
+// API: 获取批量生成状态
+app.get('/api/sprite/batch-status', (req, res) => {
+  if (!batchThreadPool) {
+    return res.json({
+      isRunning: false,
+      stats: null
+    });
+  }
+  res.json({
+    isRunning: batchThreadPool.isRunning,
+    stats: batchThreadPool.getStats()
+  });
+});
+
+// API: 中止批量生成
+app.post('/api/sprite/batch-abort', (req, res) => {
+  if (!batchThreadPool || !batchThreadPool.isRunning) {
+    return res.json({ success: false, message: '没有正在进行的批量生成' });
+  }
+
+  batchThreadPool.abort();
+  res.json({ success: true, message: '已发送中止信号' });
+});
+
 // 规范化路径分隔符
 function normalizePath(p) {
   return p.replace(/\\/g, '/');
@@ -443,7 +844,7 @@ function normalizePath(p) {
 
 // 启动服务器
 ensureDataFile();
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`服务器运行在 http://localhost:${PORT}`);
   console.log(`API 端点:`);
   console.log(`  GET  /api/videos       - 获取视频列表`);
@@ -457,4 +858,8 @@ app.listen(PORT, () => {
   console.log(`  POST /api/sprite/generate - 生成雪碧图`);
   console.log(`  GET  /api/sprite/status - 获取雪碧图生成状态`);
   console.log(`  GET  /api/sprite/info - 获取雪碧图信息`);
+  console.log(`  POST /api/sprite/batch-generate - 批量生成雪碧图`);
+  console.log(`  GET  /api/sprite/batch-status - 获取批量生成状态`);
+  console.log(`  POST /api/sprite/batch-abort - 中止批量生成`);
+  console.log(`WebSocket: ws://localhost:${PORT} - 实时状态推送`);
 });

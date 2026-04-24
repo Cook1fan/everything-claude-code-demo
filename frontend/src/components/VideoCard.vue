@@ -43,6 +43,13 @@
         </span>
       </div>
 
+      <!-- 雪碧图已生成标记 -->
+      <div v-if="video.spritePath" class="absolute top-2 right-2">
+        <span class="bg-teal-600/90 text-white text-xs px-2 py-1 rounded font-medium shadow-lg backdrop-blur-sm">
+          🗂️ 缩略图
+        </span>
+      </div>
+
       <!-- 播放按钮覆盖层 -->
       <div class="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
         <div class="w-14 h-14 bg-white/90 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity transform scale-90 group-hover:scale-100">
@@ -132,11 +139,6 @@ function handleImageLoad() {
 function handleImageError() {
   imageError.value = true
   imageLoaded.value = true
-}
-
-function getShortDirName(dir: string) {
-  const parts = dir.split(/[/\\]/)
-  return parts[parts.length - 1] || dir
 }
 
 function formatDuration(seconds: number): string {

@@ -83,3 +83,34 @@ export interface SpriteInfo {
   duration: number;
   frames: SpriteFrame[];
 }
+
+export interface SpriteStatus {
+  videoPath?: string;
+  videoId?: string;
+  videoTitle?: string;
+  message?: string;
+  percent?: number;
+  frameCount?: number;
+  totalFrames?: number;
+  error?: boolean;
+  errorMessage?: string;
+  stage?: string;
+  createdAt?: number;  // 任务开始时间
+  updatedAt?: number;
+}
+
+export interface BatchSpriteStats {
+  total: number;
+  completed: number;
+  failed: number;
+  active: number;
+  pending: number;
+  isRunning: boolean;
+  aborted: boolean;
+  done?: boolean;
+  currentVideo?: {
+    videoPath: string;
+    percent?: number;
+    message?: string;
+  };
+}
