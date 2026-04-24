@@ -79,7 +79,7 @@
               <span class="text-slate-400 text-sm">排序:</span>
               <select
                 :value="store.sortMode"
-                @change="(e) => store.setSortMode(e.target.value as any)"
+                @change="(e) => store.setSortMode((e.target as HTMLSelectElement).value as SortMode)"
                 class="px-3 py-1.5 bg-slate-700 border border-slate-600 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
               >
                 <option value="default">默认</option>
@@ -204,28 +204,17 @@
 <script setup lang="ts">
 import { onMounted, watch, ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { useVideoStore } from '@/stores/videoStore'
+import { useVideoStore, type SortMode } from '@/stores/videoStore'
 import { usePlayHistoryStore } from '@/stores/playHistoryStore'
 import VideoCard from '@/components/VideoCard.vue'
 import DirectoryTree from '@/components/DirectoryTree.vue'
 import AppLayout from '@/components/AppLayout.vue'
+import type { Video } from '@/types'
 
 const store = useVideoStore()
 const playHistory = usePlayHistoryStore()
 const router = useRouter()
 const mainContentRef = ref<HTMLElement | null>(null)
-
-// 洗牌算法
-function shuffleArray<T>(array: T[], seed: number): T[] {
-  const result = [...array]
-  let s = seed
-  for (let i = result.length - 1; i > 0; i--) {
-    s = (s * 1103515245 + 12345) & 0x7fffffff
-    const j = s % (i + 1)
-    ;[result[i], result[j]] = [result[j], result[i]]
-  }
-  return result
-}
 
 // 优先显示未播放视频的分页列表
 const prioritizedPagedVideos = computed(() => {
@@ -237,8 +226,8 @@ const prioritizedPagedVideos = computed(() => {
   }
 
   // 将视频分为未播放和已播放两组
-  const unplayed: typeof allVideos = []
-  const played: typeof allVideos = []
+  const unplayed: Video[] = []
+  const played: Video[] = []
   for (const video of allVideos) {
     if (playHistory.getPlayCount(video.id) === 0) {
       unplayed.push(video)
@@ -248,8 +237,8 @@ const prioritizedPagedVideos = computed(() => {
   }
 
   // 分别洗牌，未播放的放在前面
-  const shuffledUnplayed = shuffleArray(unplayed, store.randomSeed)
-  const shuffledPlayed = shuffleArray(played, store.randomSeed + 1)
+  const shuffledUnplayed = store.shuffleArray(unplayed, store.randomSeed)
+  const shuffledPlayed = store.shuffleArray(played, store.randomSeed + 1)
   const prioritized = [...shuffledUnplayed, ...shuffledPlayed]
 
   // 分页
@@ -289,7 +278,7 @@ async function handleScan() {
   }, 3000)
 }
 
-function playVideo(video: any) {
+function playVideo(video: Video) {
   store.addToRecent(video.id)
   router.push({ name: 'video', params: { id: video.id } })
 }

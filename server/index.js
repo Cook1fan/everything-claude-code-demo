@@ -1,8 +1,9 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
-const { exec } = require('child_process');
-const { scan } = require('../scanner/scan');
+const { execFile, spawn } = require('child_process');
+const { Worker } = require('worker_threads');
+const os = require('os');
 const { checkFFmpeg, generateSprite } = require('../scanner/spriteGenerator');
 const SpriteThreadPool = require('../scanner/spriteThreadPool');
 const config = require('../scanner/config');
@@ -18,7 +19,7 @@ const wss = new WebSocket.Server({ server });
 // ========== 缓存系统 ==========
 let videoDataCache = null;
 let videoDataCacheTime = 0;
-const CACHE_TTL = 5000; // 5秒缓存
+const CACHE_TTL = 60000; // 60秒缓存（扫描完成时会主动清除）
 
 // 带缓存的视频数据读取
 function getVideoData() {
@@ -105,6 +106,19 @@ function broadcastBatchSpriteStatus(stats) {
   const message = JSON.stringify({
     type: 'batchSpriteStatus',
     data: stats
+  });
+  clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(message);
+    }
+  });
+}
+
+// 广播扫描状态变更
+function broadcastScanStatus(status) {
+  const message = JSON.stringify({
+    type: 'scanStatus',
+    data: status
   });
   clients.forEach((client) => {
     if (client.readyState === WebSocket.OPEN) {
@@ -207,7 +221,7 @@ function ensureDataFile() {
   }
 }
 
-// API: 获取视频数据（带缓存）
+// API: 获取视频数据（带缓存，支持分页）
 app.get('/api/videos', (req, res) => {
   try {
     ensureDataFile();
@@ -227,7 +241,28 @@ app.get('/api/videos', (req, res) => {
       });
     }
 
-    res.json(data);
+    // 支持分页参数：page（页码，从1开始），limit（每页数量）
+    const page = parseInt(req.query.page, 10) || 0;
+    const limit = parseInt(req.query.limit, 10) || 0;
+
+    if (page > 0 && limit > 0) {
+      const totalVideos = data.videos.length;
+      const startIdx = (page - 1) * limit;
+      const pagedVideos = data.videos.slice(startIdx, startIdx + limit);
+
+      res.json({
+        ...data,
+        videos: pagedVideos,
+        pagination: {
+          page,
+          limit,
+          total: totalVideos,
+          totalPages: Math.ceil(totalVideos / limit),
+        },
+      });
+    } else {
+      res.json(data);
+    }
   } catch (err) {
     console.error('读取视频数据失败:', err);
     res.status(500).json({ error: '读取数据失败' });
@@ -243,18 +278,37 @@ app.post('/api/scan', (req, res) => {
   scanInProgress = true;
   res.json({ success: true, message: '扫描已开始' });
 
-  // 异步执行扫描
-  setTimeout(() => {
-    try {
-      lastScanResult = scan();
+  // 在 Worker 线程中异步执行扫描，避免阻塞事件循环
+  const scanWorker = new Worker(path.join(__dirname, '..', 'scanner', 'scanWorker.js'));
+
+  scanWorker.on('message', (message) => {
+    if (message.type === 'success') {
+      lastScanResult = message.result;
       clearVideoDataCache();
       videoInfoCache.clear();
-    } catch (err) {
-      console.error('扫描出错:', err);
-    } finally {
+      broadcastScanStatus({ scanning: false, success: true, videoCount: message.result?.videos?.length || 0 });
+    } else {
+      console.error('扫描出错:', message.error);
+      broadcastScanStatus({ scanning: false, success: false, error: message.error });
+    }
+    scanInProgress = false;
+    scanWorker.terminate();
+  });
+
+  scanWorker.on('error', (err) => {
+    console.error('扫描 Worker 错误:', err);
+    broadcastScanStatus({ scanning: false, success: false, error: err.message });
+    scanInProgress = false;
+    scanWorker.terminate();
+  });
+
+  scanWorker.on('exit', (code) => {
+    if (code !== 0) {
+      console.error('扫描 Worker 异常退出，退出码:', code);
+      broadcastScanStatus({ scanning: false, success: false, error: '扫描进程异常退出' });
       scanInProgress = false;
     }
-  }, 100);
+  });
 });
 
 // API: 获取扫描状态
@@ -297,6 +351,11 @@ function getVideoMimeType(filePath) {
   return mimeTypes[ext] || 'video/mp4';
 }
 
+// 视频流传输分块大小（50MB）
+const VIDEO_CHUNK_SIZE = 50 * 1024 * 1024;
+// 流缓冲区大小（64KB）
+const STREAM_HIGH_WATER_MARK = 64 * 1024;
+
 // API: 提供视频文件流式访问
 app.get('/api/video', (req, res) => {
   const filePath = req.query.path;
@@ -305,6 +364,10 @@ app.get('/api/video', (req, res) => {
   }
 
   const resolvedPath = path.resolve(filePath);
+
+  if (!isPathAllowed(resolvedPath)) {
+    return res.status(403).json({ error: '禁止访问该路径' });
+  }
 
   if (!fs.existsSync(resolvedPath)) {
     return res.status(404).json({ error: '文件不存在' });
@@ -318,7 +381,7 @@ app.get('/api/video', (req, res) => {
     if (range) {
       const parts = range.replace(/bytes=/, '').split('-');
       const start = parseInt(parts[0], 10) || 0;
-      const end = parts[1] ? parseInt(parts[1], 10) : Math.min(start + 50 * 1024 * 1024, stat.size - 1); // 每次最多50MB
+      const end = parts[1] ? parseInt(parts[1], 10) : Math.min(start + VIDEO_CHUNK_SIZE, stat.size - 1);
       const chunksize = (end - start) + 1;
 
       res.writeHead(206, {
@@ -332,15 +395,19 @@ app.get('/api/video', (req, res) => {
       const stream = fs.createReadStream(resolvedPath, {
         start,
         end,
-        highWaterMark: 64 * 1024 // 64KB 缓冲区
+        highWaterMark: STREAM_HIGH_WATER_MARK
       });
       stream.on('error', (err) => {
-        res.end();
+        if (!res.headersSent) {
+          res.status(500).json({ error: '视频流读取失败' });
+        } else {
+          res.end();
+        }
       });
       stream.pipe(res);
     } else {
       // 不使用完整文件传输，强制使用 range
-      const end = Math.min(50 * 1024 * 1024 - 1, stat.size - 1);
+      const end = Math.min(VIDEO_CHUNK_SIZE - 1, stat.size - 1);
       res.writeHead(206, {
         'Content-Range': `bytes 0-${end}/${stat.size}`,
         'Accept-Ranges': 'bytes',
@@ -352,10 +419,14 @@ app.get('/api/video', (req, res) => {
       const stream = fs.createReadStream(resolvedPath, {
         start: 0,
         end,
-        highWaterMark: 64 * 1024
+        highWaterMark: STREAM_HIGH_WATER_MARK
       });
       stream.on('error', (err) => {
-        res.end();
+        if (!res.headersSent) {
+          res.status(500).json({ error: '视频流读取失败' });
+        } else {
+          res.end();
+        }
       });
       stream.pipe(res);
     }
@@ -372,6 +443,11 @@ app.get('/api/image', (req, res) => {
   }
 
   const resolvedPath = path.resolve(filePath);
+
+  if (!isPathAllowed(resolvedPath)) {
+    return res.status(403).json({ error: '禁止访问该路径' });
+  }
+
   if (!fs.existsSync(resolvedPath)) {
     return res.status(404).json({ error: '文件不存在' });
   }
@@ -410,41 +486,18 @@ app.post('/api/open-video', (req, res) => {
     return res.status(404).json({ error: '文件不存在' });
   }
 
+  if (!isPathAllowed(resolvedPath)) {
+    return res.status(403).json({ error: '禁止访问该路径' });
+  }
+
   console.log('打开视频:', resolvedPath);
 
-  // 根据操作系统选择命令
-  const platform = process.platform;
-
-  try {
-    if (platform === 'win32') {
-      // Windows: 使用 start 命令，需要用 shell: true
-      exec(`start "" "${resolvedPath}"`, { shell: true }, (error) => {
-        if (error) {
-          console.warn('打开文件警告（可能已打开）:', error.message);
-        }
-        res.json({ success: true });
-      });
-    } else if (platform === 'darwin') {
-      // macOS: 使用 open 命令
-      exec(`open "${resolvedPath}"`, (error) => {
-        if (error) {
-          console.warn('打开文件警告:', error.message);
-        }
-        res.json({ success: true });
-      });
-    } else {
-      // Linux: 使用 xdg-open
-      exec(`xdg-open "${resolvedPath}"`, (error) => {
-        if (error) {
-          console.warn('打开文件警告:', error.message);
-        }
-        res.json({ success: true });
-      });
-    }
-  } catch (err) {
-    console.warn('执行命令失败:', err);
-    res.json({ success: true }); // 即使失败也返回成功，让前端处理
-  }
+  safeOpen(resolvedPath, false)
+    .then(() => res.json({ success: true }))
+    .catch((err) => {
+      console.warn('打开文件失败:', err.message);
+      res.json({ success: true });
+    });
 });
 
 // API: 打开文件所在目录
@@ -459,40 +512,18 @@ app.post('/api/open-directory', (req, res) => {
     return res.status(404).json({ error: '目录不存在' });
   }
 
+  if (!isPathAllowed(resolvedPath)) {
+    return res.status(403).json({ error: '禁止访问该路径' });
+  }
+
   console.log('打开目录:', resolvedPath);
 
-  const platform = process.platform;
-
-  try {
-    if (platform === 'win32') {
-      // Windows: 使用 explorer，需要用 shell: true
-      exec(`explorer "${resolvedPath}"`, { shell: true }, (error) => {
-        if (error) {
-          console.warn('打开目录警告（可能已打开）:', error.message);
-        }
-        res.json({ success: true });
-      });
-    } else if (platform === 'darwin') {
-      // macOS: 使用 open
-      exec(`open "${resolvedPath}"`, (error) => {
-        if (error) {
-          console.warn('打开目录警告:', error.message);
-        }
-        res.json({ success: true });
-      });
-    } else {
-      // Linux: 使用 xdg-open
-      exec(`xdg-open "${resolvedPath}"`, (error) => {
-        if (error) {
-          console.warn('打开目录警告:', error.message);
-        }
-        res.json({ success: true });
-      });
-    }
-  } catch (err) {
-    console.warn('执行命令失败:', err);
-    res.json({ success: true }); // 即使失败也返回成功
-  }
+  safeOpen(resolvedPath, true)
+    .then(() => res.json({ success: true }))
+    .catch((err) => {
+      console.warn('打开目录失败:', err.message);
+      res.json({ success: true });
+    });
 });
 
 // API: 检查 FFmpeg 状态
@@ -527,6 +558,11 @@ app.post('/api/sprite/generate', async (req, res) => {
   }
 
   const resolvedPath = path.resolve(videoPath);
+
+  if (!isPathAllowed(resolvedPath)) {
+    return res.status(403).json({ error: '禁止访问该路径' });
+  }
+
   if (!fs.existsSync(resolvedPath)) {
     return res.status(404).json({ error: '视频文件不存在' });
   }
@@ -696,6 +732,10 @@ app.get('/api/sprite/info', (req, res) => {
   }
 
   const resolvedPath = path.resolve(spritePath);
+
+  if (!isPathAllowed(resolvedPath)) {
+    return res.status(403).json({ error: '禁止访问该路径' });
+  }
   const infoPath = resolvedPath.replace(/\.(jpg|jpeg|png)$/, '.json');
 
   if (!fs.existsSync(infoPath)) {
@@ -714,14 +754,16 @@ app.get('/api/sprite/info', (req, res) => {
 app.post('/api/sprite/batch-generate', async (req, res) => {
   const videoPaths = req.body.paths;
   const force = req.body.force || false;
-  const poolSize = req.body.poolSize;
+  // 限制线程池大小：至少1个，最多CPU核心数
+  const maxPoolSize = os.cpus().length;
+  const poolSize = Math.max(1, Math.min(req.body.poolSize || (maxPoolSize - 1 || 1), maxPoolSize));
 
   if (!videoPaths || !Array.isArray(videoPaths) || videoPaths.length === 0) {
     return res.status(400).json({ error: '缺少 paths 参数或为空数组' });
   }
 
   const batchIsRunning = batchThreadPool && batchThreadPool.isRunning === true;
-  if (spriteGenerationInProgress || batchIsRunning) {
+  if (spriteGenerationInProgressSet.size > 0 || batchIsRunning) {
     return res.json({ success: false, message: '正在生成其他雪碧图，请稍候...' });
   }
 
@@ -734,11 +776,11 @@ app.post('/api/sprite/batch-generate', async (req, res) => {
     });
   }
 
-  // 验证视频文件存在
+  // 验证视频文件存在且在允许的目录内
   const validPaths = [];
   for (const videoPath of videoPaths) {
     const resolvedPath = path.resolve(videoPath);
-    if (fs.existsSync(resolvedPath)) {
+    if (isPathAllowed(resolvedPath) && fs.existsSync(resolvedPath)) {
       validPaths.push(resolvedPath);
     }
   }
@@ -840,6 +882,71 @@ app.post('/api/sprite/batch-abort', (req, res) => {
 // 规范化路径分隔符
 function normalizePath(p) {
   return p.replace(/\\/g, '/');
+}
+
+// 获取允许访问的目录列表
+function getAllowedDirectories() {
+  const allowed = [...config.hardDrives];
+  // 也允许数据输出目录
+  const outputDir = path.resolve(path.dirname(config.outputPath));
+  if (!allowed.includes(outputDir)) {
+    allowed.push(outputDir);
+  }
+  return allowed;
+}
+
+// 校验路径是否在允许的目录范围内，防止路径遍历攻击
+function isPathAllowed(resolvedPath) {
+  const normalizedPath = normalizePath(path.resolve(resolvedPath));
+  const allowedDirs = getAllowedDirectories();
+
+  for (const dir of allowedDirs) {
+    let normalizedDir = normalizePath(path.resolve(dir));
+
+    // 处理 Windows 盘符情况（如 "W:" -> "W:/"）
+    if (process.platform === 'win32' && /^[A-Za-z]:$/.test(normalizedDir)) {
+      normalizedDir = normalizedDir + '/';
+    }
+
+    // 确保目录路径以分隔符结尾，便于前缀匹配
+    const dirWithSlash = normalizedDir.endsWith('/') ? normalizedDir : normalizedDir + '/';
+
+    if (normalizedPath === normalizedDir || normalizedPath.startsWith(dirWithSlash)) {
+      return true;
+    }
+  }
+
+  console.log('路径被拒绝:', normalizedPath, '允许的目录:', allowedDirs);
+  return false;
+}
+
+// 安全地打开文件或目录（使用 spawn 代替字符串拼接，防止命令注入）
+function safeOpen(targetPath, isDirectory = false) {
+  const resolvedPath = path.resolve(targetPath);
+  if (!isPathAllowed(resolvedPath)) {
+    return Promise.reject(new Error('路径不在允许范围内'));
+  }
+
+  return new Promise((resolve, reject) => {
+    const platform = process.platform;
+    try {
+      if (platform === 'win32') {
+        // 使用 spawn 传参方式避免命令注入
+        if (isDirectory) {
+          spawn('explorer', [resolvedPath], { detached: true, stdio: 'ignore' });
+        } else {
+          spawn('cmd', ['/c', 'start', '', resolvedPath], { detached: true, stdio: 'ignore' });
+        }
+      } else if (platform === 'darwin') {
+        spawn('open', [resolvedPath], { detached: true, stdio: 'ignore' });
+      } else {
+        spawn('xdg-open', [resolvedPath], { detached: true, stdio: 'ignore' });
+      }
+      resolve();
+    } catch (err) {
+      reject(err);
+    }
+  });
 }
 
 // 启动服务器

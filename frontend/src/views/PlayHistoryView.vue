@@ -22,7 +22,7 @@
                 <span class="text-slate-400 text-sm">排序:</span>
                 <select
                   :value="sortMode"
-                  @change="(e) => sortMode = e.target.value as any"
+                  @change="(e) => sortMode = (e.target as HTMLSelectElement).value as HistorySortMode"
                   class="px-3 py-1.5 bg-slate-700 border border-slate-600 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
                 >
                   <option value="duration">播放时长</option>
@@ -122,16 +122,25 @@ import { useVideoStore } from '@/stores/videoStore'
 import { usePlayHistoryStore } from '@/stores/playHistoryStore'
 import VideoCard from '@/components/VideoCard.vue'
 import AppLayout from '@/components/AppLayout.vue'
-import type { Video, VideoPlayRecord } from '@/types'
+import type { Video } from '@/types'
 
 const store = useVideoStore()
 const playHistory = usePlayHistoryStore()
 const router = useRouter()
 
-type SortMode = 'duration' | 'count' | 'recent'
-const sortMode = ref<SortMode>('duration')
+type HistorySortMode = 'duration' | 'count' | 'recent'
+const sortMode = ref<HistorySortMode>('duration')
 
 const records = computed(() => playHistory.getAllRecords())
+
+// 构建视频ID到视频对象的 Map，实现 O(1) 查找
+const videoMap = computed(() => {
+  const map = new Map<string, Video>()
+  for (const v of store.videos) {
+    map.set(v.id, v)
+  }
+  return map
+})
 
 const sortedRecords = computed(() => {
   const result = [...records.value]
@@ -150,7 +159,7 @@ const sortedRecords = computed(() => {
 })
 
 function getVideo(videoId: string): Video | undefined {
-  return store.videos.find(v => v.id === videoId)
+  return videoMap.value.get(videoId)
 }
 
 function playVideo(video: Video) {

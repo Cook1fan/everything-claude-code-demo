@@ -127,6 +127,14 @@ export const useVideoStore = defineStore('video', () => {
           } else if (message.type === 'batchSpriteStatus') {
             batchSpriteStats.value = message.data
             batchSpriteInProgress.value = message.data.isRunning
+          } else if (message.type === 'scanStatus') {
+            // 处理扫描状态变更通知
+            scanning.value = message.data.scanning
+            if (!message.data.scanning && message.data.success) {
+              videoCount.value = message.data.videoCount || 0
+              // 扫描完成后自动刷新视频列表
+              loadVideos()
+            }
           }
         } catch (err) {
           console.error('解析 WebSocket 消息失败:', err)
@@ -572,5 +580,6 @@ export const useVideoStore = defineStore('video', () => {
     connectWebSocket,
     disconnectWebSocket,
     clearAllSpriteTasks,
+    shuffleArray,
   }
 })

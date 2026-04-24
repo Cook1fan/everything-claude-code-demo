@@ -1,6 +1,7 @@
 const { execFile } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const config = require('./config');
 
 // 根据视频时长动态计算最佳帧间隔
@@ -72,29 +73,35 @@ function getVideoDuration(ffmpegPath, videoPath) {
   });
 }
 
-// 生成临时帧目录
-function createTempDir(videoPath) {
-  const tempDir = path.join(path.dirname(videoPath), '.temp_frames_' + Date.now());
-  if (!fs.existsSync(tempDir)) {
-    fs.mkdirSync(tempDir, { recursive: true });
-  }
+// 在系统临时目录创建临时文件夹
+function createTempDir() {
+  const tempDir = path.join(os.tmpdir(), `sprite-gen-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+  fs.mkdirSync(tempDir, { recursive: true });
   return tempDir;
 }
 
-// 清理临时目录（递归删除）
+// 清理临时目录（递归删除，不抛出异常掩盖原始错误）
 function cleanupTempDir(tempDir) {
-  if (fs.existsSync(tempDir)) {
-    const files = fs.readdirSync(tempDir);
-    for (const file of files) {
-      const fullPath = path.join(tempDir, file);
-      const stat = fs.statSync(fullPath);
-      if (stat.isDirectory()) {
-        cleanupTempDir(fullPath);
-      } else {
-        fs.unlinkSync(fullPath);
+  try {
+    if (fs.existsSync(tempDir)) {
+      const files = fs.readdirSync(tempDir);
+      for (const file of files) {
+        const fullPath = path.join(tempDir, file);
+        try {
+          const stat = fs.statSync(fullPath);
+          if (stat.isDirectory()) {
+            cleanupTempDir(fullPath);
+          } else {
+            fs.unlinkSync(fullPath);
+          }
+        } catch (err) {
+          console.warn('清理临时文件失败:', fullPath, err.message);
+        }
       }
+      fs.rmdirSync(tempDir);
     }
-    fs.rmdirSync(tempDir);
+  } catch (err) {
+    console.warn('清理临时目录失败:', tempDir, err.message);
   }
 }
 
@@ -127,7 +134,7 @@ function extractFrames(ffmpegPath, videoPath, tempDir, interval, duration, thumb
       '-vf', `fps=1/${interval},scale=${thumbnailWidth}:${thumbnailHeight}`,
       '-fps_mode', 'vfr',
       '-q:v', String(quality),
-      '-threads', '16',
+      '-threads', String(os.cpus().length),
       '-f', 'image2',
       outputPattern
     ];
@@ -140,17 +147,26 @@ function extractFrames(ffmpegPath, videoPath, tempDir, interval, duration, thumb
     let stuckCount = 0;
     const maxStuckCount = 120;
 
-    const process = execFile(ffmpegPath, args, (error, stdout, stderr) => {
+    const proc = execFile(ffmpegPath, args, (error, stdout, stderr) => {
       if (error) {
         console.log('FFmpeg返回错误:', error.message);
         extractError = error;
       }
 
-      console.log('FFmpeg stderr:', stderr.substring(stderr.length - 500));
+      if (stderr && stderr.length > 0) {
+        console.log('FFmpeg stderr:', stderr.substring(Math.max(0, stderr.length - 500)));
+      }
 
-      const frames = fs.readdirSync(tempDir)
-        .filter(f => f.startsWith('frame_') && f.endsWith('.jpg'))
-        .sort();
+      let frames = [];
+      try {
+        if (fs.existsSync(tempDir)) {
+          frames = fs.readdirSync(tempDir)
+            .filter(f => f.startsWith('frame_') && f.endsWith('.jpg'))
+            .sort();
+        }
+      } catch (e) {
+        console.log('读取帧目录失败:', e.message);
+      }
 
       console.log('提取到的帧数:', frames.length);
 
@@ -174,16 +190,18 @@ function extractFrames(ffmpegPath, videoPath, tempDir, interval, duration, thumb
 
     frameCheckInterval = setInterval(() => {
       try {
-        const frames = fs.readdirSync(tempDir)
-          .filter(f => f.startsWith('frame_') && f.endsWith('.jpg'));
+        let frames = [];
+        if (fs.existsSync(tempDir)) {
+          frames = fs.readdirSync(tempDir)
+            .filter(f => f.startsWith('frame_') && f.endsWith('.jpg'));
+        }
 
         if (frames.length === lastFrameCount) {
           stuckCount++;
-          // console.log(`进度检测: ${frames.length} 帧, 卡住 ${stuckCount}/${maxStuckCount}`);
           if (stuckCount >= maxStuckCount) {
             console.log('FFmpeg 似乎卡住了，强制终止...');
             try {
-              process.kill();
+              proc.kill();
             } catch (e) {
               console.log('终止进程失败:', e.message);
             }
@@ -209,9 +227,10 @@ function extractFrames(ffmpegPath, videoPath, tempDir, interval, duration, thumb
       }
     }, 1000);
 
-    process.on('close', () => {
+    proc.on('close', () => {
       if (frameCheckInterval) {
         clearInterval(frameCheckInterval);
+        frameCheckInterval = null;
       }
     });
   });
@@ -371,7 +390,7 @@ async function generateSprite(videoPath, options = {}, onProgress) {
   const {
     interval: configInterval = 10,
     columns = 5,
-    thumbnailWidth = 160,
+    thumbnailWidth = 320,
     quality = 3,
   } = spriteConfig;
 
@@ -386,6 +405,10 @@ async function generateSprite(videoPath, options = {}, onProgress) {
       fs.unlinkSync(outputPath);
       if (fs.existsSync(infoPath)) {
         fs.unlinkSync(infoPath);
+      }
+      const vttPath = outputPath.replace(/\.(jpg|jpeg|png)$/, '.vtt');
+      if (fs.existsSync(vttPath)) {
+        fs.unlinkSync(vttPath);
       }
     } catch (err) {
       console.warn('删除旧雪碧图失败（可能被占用），将继续:', err.message);
@@ -411,7 +434,7 @@ async function generateSprite(videoPath, options = {}, onProgress) {
     console.log('视频时长:', duration, '秒');
 
     const interval = calculateOptimalInterval(duration, configInterval);
-    tempDir = createTempDir(videoPath);
+    tempDir = createTempDir(); // 使用系统临时目录
 
     const extractResult = await extractFrames(
       ffmpegPath,

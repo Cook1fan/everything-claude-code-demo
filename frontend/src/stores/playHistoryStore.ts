@@ -92,9 +92,13 @@ export const usePlayHistoryStore = defineStore('playHistory', () => {
     if (!hasCountedForThisVideo) {
       const existing = playRecords.value.get(videoId)
       if (existing) {
-        existing.playCount++
-        existing.lastPlayedAt = now
-        saveToDB(existing)
+        const updated: VideoPlayRecord = {
+          ...existing,
+          playCount: existing.playCount + 1,
+          lastPlayedAt: now,
+        }
+        playRecords.value.set(videoId, updated)
+        saveToDB(updated)
       } else {
         const newRecord: VideoPlayRecord = {
           videoId,
@@ -123,8 +127,9 @@ export const usePlayHistoryStore = defineStore('playHistory', () => {
       // 最后更新一次总时长
       const record = playRecords.value.get(currentSession.value.videoId)
       if (record) {
-        record.totalPlayTime = initialTotalTime + Math.floor(currentSession.value.accumulatedTime)
-        saveToDB(record)
+        const updated = { ...record, totalPlayTime: initialTotalTime + Math.floor(currentSession.value.accumulatedTime) }
+        playRecords.value.set(currentSession.value.videoId, updated)
+        saveToDB(updated)
       }
     }
   }
@@ -141,7 +146,8 @@ export const usePlayHistoryStore = defineStore('playHistory', () => {
     // 只在内存中更新，不保存到 DB
     const record = playRecords.value.get(currentSession.value.videoId)
     if (record) {
-      record.totalPlayTime = initialTotalTime + Math.floor(currentSession.value.accumulatedTime)
+      const updated = { ...record, totalPlayTime: initialTotalTime + Math.floor(currentSession.value.accumulatedTime) }
+      playRecords.value.set(currentSession.value.videoId, updated)
     }
   }
 
@@ -156,8 +162,9 @@ export const usePlayHistoryStore = defineStore('playHistory', () => {
       // 最后确保更新一次总时长
       const record = playRecords.value.get(currentSession.value.videoId)
       if (record) {
-        record.totalPlayTime = initialTotalTime + Math.floor(currentSession.value.accumulatedTime)
-        saveToDB(record)
+        const updated = { ...record, totalPlayTime: initialTotalTime + Math.floor(currentSession.value.accumulatedTime) }
+        playRecords.value.set(currentSession.value.videoId, updated)
+        saveToDB(updated)
       }
       currentSession.value = null
     }
@@ -193,8 +200,9 @@ export const usePlayHistoryStore = defineStore('playHistory', () => {
   function setRating(videoId: string, rating: number) {
     const existing = playRecords.value.get(videoId)
     if (existing) {
-      existing.rating = rating
-      saveToDB(existing)
+      const updated = { ...existing, rating }
+      playRecords.value.set(videoId, updated)
+      saveToDB(updated)
     } else {
       const newRecord: VideoPlayRecord = {
         videoId,
@@ -219,8 +227,9 @@ export const usePlayHistoryStore = defineStore('playHistory', () => {
     if (existing) {
       // 只在没有保存过时才保存，或者时长有显著变化时更新
       if (!existing.videoDuration || Math.abs(existing.videoDuration - duration) > 1) {
-        existing.videoDuration = duration
-        saveToDB(existing)
+        const updated = { ...existing, videoDuration: duration }
+        playRecords.value.set(videoId, updated)
+        saveToDB(updated)
       }
     } else {
       const newRecord: VideoPlayRecord = {
@@ -244,8 +253,9 @@ export const usePlayHistoryStore = defineStore('playHistory', () => {
   function setLastPlaybackPosition(videoId: string, position: number) {
     const existing = playRecords.value.get(videoId)
     if (existing) {
-      existing.lastPlaybackPosition = position
-      saveToDB(existing)
+      const updated = { ...existing, lastPlaybackPosition: position }
+      playRecords.value.set(videoId, updated)
+      saveToDB(updated)
     } else {
       const newRecord: VideoPlayRecord = {
         videoId,
@@ -263,8 +273,9 @@ export const usePlayHistoryStore = defineStore('playHistory', () => {
   function clearLastPlaybackPosition(videoId: string) {
     const existing = playRecords.value.get(videoId)
     if (existing) {
-      existing.lastPlaybackPosition = 0
-      saveToDB(existing)
+      const updated = { ...existing, lastPlaybackPosition: 0 }
+      playRecords.value.set(videoId, updated)
+      saveToDB(updated)
     }
   }
 
@@ -277,8 +288,9 @@ export const usePlayHistoryStore = defineStore('playHistory', () => {
   function setIsBadQuality(videoId: string, isBad: boolean) {
     const existing = playRecords.value.get(videoId)
     if (existing) {
-      existing.isBadQuality = isBad
-      saveToDB(existing)
+      const updated = { ...existing, isBadQuality: isBad }
+      playRecords.value.set(videoId, updated)
+      saveToDB(updated)
     } else {
       const newRecord: VideoPlayRecord = {
         videoId,
@@ -309,12 +321,10 @@ export const usePlayHistoryStore = defineStore('playHistory', () => {
     }
 
     if (existing) {
-      if (!existing.timestamps) {
-        existing.timestamps = []
-      }
-      existing.timestamps.push(timestamp)
-      existing.timestamps.sort((a, b) => a.time - b.time)
-      saveToDB(existing)
+      const timestamps = [...(existing.timestamps || []), timestamp].sort((a, b) => a.time - b.time)
+      const updated = { ...existing, timestamps }
+      playRecords.value.set(videoId, updated)
+      saveToDB(updated)
     } else {
       const newRecord: VideoPlayRecord = {
         videoId,
@@ -333,8 +343,9 @@ export const usePlayHistoryStore = defineStore('playHistory', () => {
   function removeTimestamp(videoId: string, timestampId: string) {
     const existing = playRecords.value.get(videoId)
     if (existing && existing.timestamps) {
-      existing.timestamps = existing.timestamps.filter(t => t.id !== timestampId)
-      saveToDB(existing)
+      const updated = { ...existing, timestamps: existing.timestamps.filter(t => t.id !== timestampId) }
+      playRecords.value.set(videoId, updated)
+      saveToDB(updated)
     }
   }
 

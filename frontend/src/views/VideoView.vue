@@ -623,7 +623,7 @@ async function getVttBlobUrl(vttPath: string, spritePath: string): Promise<strin
 
     // 替换 VTT 中的雪碧图文件名为完整的 API URL
     if (spriteFileName) {
-      const spriteUrl = store.getSpriteUrl({ spritePath } as any)
+      const spriteUrl = store.getSpriteUrl({ spritePath } as unknown as Video)
       console.log('雪碧图 URL:', spriteUrl)
       // 替换所有 "filename#xywh=" 为 "完整URL#xywh="
       // 使用字符串替换而不是正则表达式，避免特殊字符问题
@@ -658,9 +658,8 @@ async function loadPlayer() {
   }
 
   // 构建 Plyr 配置
-  const plyrConfig: any = {
+  const plyrConfig: Plyr.Options = {
     autoplay: false,
-    preload: 'metadata',
     controls: [
       'play-large',
       'play',
@@ -905,13 +904,13 @@ watch([() => store.spriteInProgress, () => store.spriteStatus], () => {
   watchSpriteStatus()
 })
 
-watch(() => route.params.id, async (newId, oldId) => {
+watch(() => route.params.id, async (_newId, oldId) => {
   // 切换视频前保存当前视频的播放位置
   if (oldId && player) {
     const currentTime = player.currentTime
     if (currentTime && currentTime > 0) {
       // 直接用 oldId 保存，不要用 saveCurrentPosition()，因为 video.value 已经变了
-      playHistory.setLastPlaybackPosition(oldId, currentTime)
+      playHistory.setLastPlaybackPosition(oldId as string, currentTime)
     }
   }
   playHistory.stopSession()

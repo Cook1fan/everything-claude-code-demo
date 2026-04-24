@@ -69,7 +69,7 @@
             📦 {{ store.formatFileSize(video.fileSize) }}
           </span>
           <span class="shrink-0 text-blue-400">
-            🎬 {{ videoDuration ? formatDuration(videoDuration) : '--:--' }}
+            🎬 {{ videoDuration ? playHistory.formatPlayTime(videoDuration) : '--:--' }}
           </span>
         </div>
         <div class="flex items-center justify-between text-xs">
@@ -104,7 +104,7 @@ const props = defineProps<{
   video: Video
 }>()
 
-const emit = defineEmits<{
+defineEmits<{
   click: [video: Video]
 }>()
 
@@ -118,7 +118,6 @@ const posterUrl = computed(() => {
   return store.getImageUrl(props.video)
 })
 
-const playCount = computed(() => playHistory.getPlayCount(props.video.id))
 const totalPlayTime = computed(() => playHistory.getTotalPlayTime(props.video.id))
 const rating = computed(() => playHistory.getRating(props.video.id))
 const isBadQuality = computed(() => playHistory.getIsBadQuality(props.video.id))
@@ -141,15 +140,6 @@ function handleImageError() {
   imageLoaded.value = true
 }
 
-function formatDuration(seconds: number): string {
-  const hours = Math.floor(seconds / 3600)
-  const minutes = Math.floor((seconds % 3600) / 60)
-  const secs = Math.floor(seconds % 60)
-  if (hours > 0) {
-    return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
-  }
-  return `${minutes}:${secs.toString().padStart(2, '0')}`
-}
 </script>
 
 <style scoped>

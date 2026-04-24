@@ -14,6 +14,7 @@ class SpriteThreadPool extends EventEmitter {
     this.isRunning = false;
     this.aborted = false;
     this.workerPath = path.join(__dirname, 'spriteWorker.js');
+    this.activeWorkersSet = new Set(); // 跟踪活跃的 worker
   }
 
   addVideo(videoPath, options = {}) {
@@ -45,6 +46,7 @@ class SpriteThreadPool extends EventEmitter {
     this.aborted = false;
     this.results = [];
     this.taskIndex = 0;
+    this.pendingTasks = this.videoPaths.length; // 跟踪待完成任务数
 
     console.log('[ThreadPool] 启动线程池，大小:', this.poolSize);
     console.log('[ThreadPool] 待处理视频数:', this.videoPaths.length);
@@ -56,25 +58,29 @@ class SpriteThreadPool extends EventEmitter {
     }
 
     return new Promise((resolve) => {
-      const checkDone = () => {
-        if (this.activeWorkers === 0 || this.aborted) {
+      this.on('taskComplete', () => {
+        this.pendingTasks--;
+        if (this.pendingTasks === 0 || this.aborted) {
           this.isRunning = false;
           this.emit('done', { results: this.results, stats: this.getStats() });
           resolve({ results: this.results, stats: this.getStats() });
         }
-      };
-
-      const interval = setInterval(() => {
-        if (this.activeWorkers === 0 || this.aborted) {
-          clearInterval(interval);
-          checkDone();
-        }
-      }, 100);
+      });
     });
   }
 
   abort() {
     this.aborted = true;
+    // 终止所有正在运行的 worker
+    for (const worker of this.activeWorkersSet) {
+      try {
+        worker.terminate();
+      } catch (err) {
+        // worker 可能已经退出
+      }
+    }
+    this.activeWorkersSet.clear();
+    this.activeWorkers = 0;
     this.emit('abort');
   }
 
@@ -94,6 +100,8 @@ class SpriteThreadPool extends EventEmitter {
         options: task.options
       }
     });
+
+    this.activeWorkersSet.add(worker);
 
     worker.on('message', (message) => {
       this.handleWorkerMessage(worker, task.videoPath, message);
@@ -125,6 +133,7 @@ class SpriteThreadPool extends EventEmitter {
         success: true,
         ...message
       });
+      this.emit('taskComplete');
     } else if (message.type === 'error') {
       this.results.push({
         videoPath,
@@ -136,11 +145,16 @@ class SpriteThreadPool extends EventEmitter {
         success: false,
         error: message.error
       });
+      this.emit('taskComplete');
     }
   }
 
   handleWorkerError(worker, videoPath, error) {
     console.error('[ThreadPool] Worker 错误:', path.basename(videoPath), error.message);
+    // 防止 error 和 exit 事件双重计数
+    if (!this.activeWorkersSet.has(worker)) return;
+    this.activeWorkersSet.delete(worker);
+
     const existing = this.results.find(r => r.videoPath === videoPath);
     if (!existing) {
       this.results.push({
@@ -148,6 +162,7 @@ class SpriteThreadPool extends EventEmitter {
         success: false,
         error: error.message
       });
+      this.emit('taskComplete');
     }
     this.activeWorkers--;
     this.createWorker();
@@ -157,6 +172,10 @@ class SpriteThreadPool extends EventEmitter {
     if (code !== 0) {
       console.error('[ThreadPool] Worker 异常退出:', path.basename(videoPath), '退出码:', code);
     }
+    // 防止 error 和 exit 事件双重计数
+    if (!this.activeWorkersSet.has(worker)) return;
+    this.activeWorkersSet.delete(worker);
+
     this.activeWorkers--;
     this.createWorker();
   }

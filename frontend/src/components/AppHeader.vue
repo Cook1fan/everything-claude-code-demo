@@ -174,10 +174,7 @@
 import { computed, ref, watch, onMounted, onBeforeUnmount, markRaw } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useVideoStore } from '@/stores/videoStore'
-import { usePlayHistoryStore } from '@/stores/playHistoryStore'
-
 const store = useVideoStore()
-const playHistory = usePlayHistoryStore()
 const route = useRoute()
 const router = useRouter()
 const showSpritePanel = ref(false)
@@ -199,11 +196,6 @@ const allSpriteStatus = computed(() => {
     const timeB = b.createdAt || 0
     return timeB - timeA
   })
-})
-
-// 是否有任何雪碧图任务（进行中或已完成）
-const hasAnySpriteTasks = computed(() => {
-  return store.spriteInProgressSet.size > 0 || store.spriteStatusMap.size > 0
 })
 
 // 点击外部关闭面板
@@ -246,7 +238,7 @@ function getVideoName(videoPath?: string) {
   return parts[parts.length - 1] || videoPath
 }
 
-function navigateToVideo(status: any) {
+function navigateToVideo(status: { videoId?: string; videoPath?: string }) {
   if (!status.videoId) return
 
   // 清除倒计时
@@ -269,7 +261,7 @@ function navigateToVideo(status: any) {
   router.push('/video/' + status.videoId)
 }
 
-function shouldShowCountdown(status: any): boolean {
+function shouldShowCountdown(status: { videoPath?: string; percent?: number }): boolean {
   if (!status.videoPath) return false
   return status.percent === 100 && countdownSecondsMap.has(status.videoPath) && countdownSecondsMap.get(status.videoPath)! > 0
 }
@@ -309,21 +301,22 @@ watch(() => allSpriteStatus.value, (newStatuses) => {
       countdownSecondsMap.set(status.videoPath, COUNTDOWN_SECONDS)
       countdownUpdateTriggers.value.set(status.videoPath, Date.now())
 
+      const vp = status.videoPath
       const timer = window.setInterval(() => {
-        const current = countdownSecondsMap.get(status.videoPath) || 0
+        const current = countdownSecondsMap.get(vp) || 0
         if (current <= 1) {
           clearInterval(timer)
-          countdownTimers.delete(status.videoPath)
-          countdownSecondsMap.delete(status.videoPath)
-          countdownUpdateTriggers.value.delete(status.videoPath)
+          countdownTimers.delete(vp)
+          countdownSecondsMap.delete(vp)
+          countdownUpdateTriggers.value.delete(vp)
           location.reload()
         } else {
-          countdownSecondsMap.set(status.videoPath, current - 1)
-          countdownUpdateTriggers.value.set(status.videoPath, Date.now())
+          countdownSecondsMap.set(vp, current - 1)
+          countdownUpdateTriggers.value.set(vp, Date.now())
         }
       }, 1000)
 
-      countdownTimers.set(status.videoPath, timer)
+      countdownTimers.set(vp, timer)
     }
 
     wasInProgressMap.set(status.videoPath, isInProgress)
