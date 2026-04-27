@@ -304,6 +304,42 @@ export const usePlayHistoryStore = defineStore('playHistory', () => {
     }
   }
 
+  // 获取雪碧图生成时间
+  function getSpriteGeneratedAt(videoId: string): number | undefined {
+    return playRecords.value.get(videoId)?.spriteGeneratedAt
+  }
+
+  // 获取雪碧图生成耗时
+  function getSpriteGenerateTime(videoId: string): number | undefined {
+    return playRecords.value.get(videoId)?.spriteGenerateTime
+  }
+
+  // 设置雪碧图生成记录
+  function setSpriteGenerated(videoId: string, generateTime?: number) {
+    const existing = playRecords.value.get(videoId)
+    const now = Date.now()
+    if (existing) {
+      const updated = {
+        ...existing,
+        spriteGeneratedAt: now,
+        spriteGenerateTime: generateTime,
+      }
+      playRecords.value.set(videoId, updated)
+      saveToDB(updated)
+    } else {
+      const newRecord: VideoPlayRecord = {
+        videoId,
+        playCount: 0,
+        totalPlayTime: 0,
+        lastPlayedAt: now,
+        spriteGeneratedAt: now,
+        spriteGenerateTime: generateTime,
+      }
+      playRecords.value.set(videoId, newRecord)
+      saveToDB(newRecord)
+    }
+  }
+
   // 获取视频的精彩时间点
   function getTimestamps(videoId: string): VideoTimestamp[] {
     return playRecords.value.get(videoId)?.timestamps || []
@@ -412,5 +448,8 @@ export const usePlayHistoryStore = defineStore('playHistory', () => {
     clearLastPlaybackPosition,
     getIsBadQuality,
     setIsBadQuality,
+    getSpriteGeneratedAt,
+    getSpriteGenerateTime,
+    setSpriteGenerated,
   }
 })

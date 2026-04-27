@@ -95,7 +95,7 @@ class DirCache {
     let posterPath = null;
 
     if (posterFiles.length > 0) {
-      // 按优先级查找
+      // 先找通用名称（保留这个逻辑用于目录海报）
       for (const posterName of config.posterNames) {
         for (const file of posterFiles) {
           const nameWithoutExt = path.basename(file, path.extname(file)).toLowerCase();
@@ -114,6 +114,7 @@ class DirCache {
 
     return {
       files,
+      posterFiles, // 保存图片文件列表，给后面视频匹配同名图片用
       hasPoster: posterFiles.length > 0,
       posterPath
     };
@@ -210,17 +211,55 @@ function scanDirectoryRecursive(dirPath, hardDrive, dirCache, results) {
       // 注意：扫描时不自动生成 VTT，需要时在前端或单独生成
     }
 
+    // 查找海报 - 优先找与视频同名的图片
+    let videoPosterPath = null;
+    if (dirInfo.posterFiles && dirInfo.posterFiles.length > 0) {
+      // 1. 先找与视频同名的图片
+      for (const file of dirInfo.posterFiles) {
+        const nameWithoutExt = path.basename(file, path.extname(file));
+        if (nameWithoutExt.toLowerCase() === baseName.toLowerCase()) {
+          videoPosterPath = path.join(dirPath, file);
+          break;
+        }
+      }
+      // 2. 如果没找到，再找通用名称
+      if (!videoPosterPath) {
+        for (const posterName of config.posterNames) {
+          for (const file of dirInfo.posterFiles) {
+            const nameWithoutExt = path.basename(file, path.extname(file)).toLowerCase();
+            if (nameWithoutExt === posterName) {
+              videoPosterPath = path.join(dirPath, file);
+              break;
+            }
+          }
+          if (videoPosterPath) break;
+        }
+      }
+      // 3. 最后，如果没找到通用名称，用第一张图（但要排除雪碧图）
+      if (!videoPosterPath) {
+        for (const file of dirInfo.posterFiles) {
+          // 排除雪碧图
+          if (!file.toLowerCase().endsWith('_sprite.jpg') &&
+              !file.toLowerCase().endsWith('_sprite.jpeg') &&
+              !file.toLowerCase().endsWith('_sprite.png')) {
+            videoPosterPath = path.join(dirPath, file);
+            break;
+          }
+        }
+      }
+    }
+
     const video = {
       id: generateId(videoPath),
       title: getTitleFromPath(videoPath, videoCountInDir),
       directory: normalizedDirPath,
       hardDrive: hardDrive,
       videoPath: normalizePath(videoPath),
-      posterPath: dirInfo.posterPath ? normalizePath(dirInfo.posterPath) : undefined,
+      posterPath: videoPosterPath ? normalizePath(videoPosterPath) : undefined,
       spritePath: spritePath ? normalizePath(spritePath) : undefined,
       spriteVttPath: spriteVttPath ? normalizePath(spriteVttPath) : undefined,
       videoExtension: path.extname(videoFile).toLowerCase(),
-      posterExtension: dirInfo.posterPath ? path.extname(dirInfo.posterPath) : undefined,
+      posterExtension: videoPosterPath ? path.extname(videoPosterPath) : undefined,
       fileSize: videoStat.size,
       createdAt: videoStat.birthtimeMs,
       updatedAt: videoStat.mtimeMs,

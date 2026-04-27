@@ -2,10 +2,11 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { Video, VideoData, ScanStatus, DirectoryTreeNode, SpriteInfo, SpriteStatus, BatchSpriteStats } from '@/types'
 import * as indexedDB from '@/utils/indexedDB'
+import { usePlayHistoryStore } from './playHistoryStore'
 
 const API_BASE = '/api'
 
-export type SortMode = 'default' | 'random' | 'name' | 'date'
+export type SortMode = 'default' | 'random' | 'name' | 'date' | 'rating'
 
 export const useVideoStore = defineStore('video', () => {
   const videos = ref<Video[]>([])
@@ -29,6 +30,9 @@ export const useVideoStore = defineStore('video', () => {
   // 雪碧图生成状态 - 支持多个同时生成
   const spriteInProgressSet = ref<Set<string>>(new Set())
   const spriteStatusMap = ref<Map<string, SpriteStatus>>(new Map())
+
+  // 跟踪已经处理过的雪碧图完成状态（避免重复处理）
+  const processedSpriteStatusKeys = ref<Set<string>>(new Set())
 
   // 批量雪碧图生成状态
   const batchSpriteInProgress = ref(false)
@@ -70,13 +74,38 @@ export const useVideoStore = defineStore('video', () => {
         try {
           const message = JSON.parse(event.data)
           if (message.type === 'spriteStatus') {
-            // 不清空整个 Map，只更新收到的状态
+            // 创建新的 Map 而不是修改现有 Map（这样才会触发响应式更新）
+            const newMap = new Map(spriteStatusMap.value)
             const newInProgressSet = new Set<string>()
+
             if (message.data.allStatus && Array.isArray(message.data.allStatus)) {
               // 先添加/更新所有状态
               for (const status of message.data.allStatus) {
                 if (status.videoPath) {
-                  spriteStatusMap.value.set(status.videoPath, status)
+                  // 检查这个状态是否是刚完成的（100% 且未处理过）
+                  if (status.percent === 100 && !status.error && status.videoId) {
+                    const statusKey = `${status.videoId}-${status.updatedAt || status.createdAt}`
+                    if (!processedSpriteStatusKeys.value.has(statusKey)) {
+                      // 标记为已处理
+                      processedSpriteStatusKeys.value.add(statusKey)
+
+                      // 计算生成耗时
+                      let generateTime: number | undefined
+                      if (status.createdAt && status.updatedAt) {
+                        generateTime = status.updatedAt - status.createdAt
+                      }
+
+                      // 保存到播放历史 store（持久化到 IndexedDB）
+                      try {
+                        const playHistory = usePlayHistoryStore()
+                        playHistory.setSpriteGenerated(status.videoId, generateTime)
+                      } catch (err) {
+                        console.error('保存雪碧图生成时间失败:', err)
+                      }
+                    }
+                  }
+
+                  newMap.set(status.videoPath, status)
                   if (status.percent != null && status.percent < 100 && !status.error) {
                     newInProgressSet.add(status.videoPath)
                   }
@@ -90,7 +119,7 @@ export const useVideoStore = defineStore('video', () => {
               }
 
               // 统一清理：超过5个时优先删除最先完成的
-              const allStatuses = Array.from(spriteStatusMap.value.values())
+              const allStatuses = Array.from(newMap.values())
               if (allStatuses.length > 5) {
                 // 分成两组：已完成的和进行中的
                 const completed = allStatuses.filter(s =>
@@ -118,11 +147,14 @@ export const useVideoStore = defineStore('video', () => {
                 // 执行删除
                 for (const status of toDelete) {
                   if (status.videoPath) {
-                    spriteStatusMap.value.delete(status.videoPath)
+                    newMap.delete(status.videoPath)
                   }
                 }
               }
             }
+
+            // 替换整个 Map 触发响应式更新
+            spriteStatusMap.value = newMap
             spriteInProgressSet.value = newInProgressSet
           } else if (message.type === 'batchSpriteStatus') {
             batchSpriteStats.value = message.data

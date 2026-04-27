@@ -309,9 +309,17 @@
                   alt="雪碧图"
                 />
               </div>
-              <p v-if="spriteInfo" class="text-slate-500 text-xs mt-1.5">
-                每 {{ spriteInfo.interval }} 秒一帧，共 {{ spriteInfo.duration }} 秒
-              </p>
+              <div class="mt-1.5 space-y-0.5">
+                <p v-if="spriteInfo" class="text-slate-500 text-xs">
+                  每 {{ spriteInfo.interval }} 秒一帧，共 {{ spriteInfo.duration }} 秒
+                </p>
+                <p v-if="spriteGeneratedAt" class="text-slate-500 text-xs">
+                  生成于 {{ new Date(spriteGeneratedAt).toLocaleString() }}
+                  <span v-if="spriteGenerateTime">
+                    (耗时 {{ (spriteGenerateTime / 1000).toFixed(1) }} 秒)
+                  </span>
+                </p>
+              </div>
             </div>
           </div>
         </div>
@@ -339,6 +347,7 @@ const videoRef = ref<HTMLVideoElement | null>(null)
 const playError = ref<string | null>(null)
 const ffmpegAvailable = ref<boolean | null>(null)
 const spriteGenerating = ref(false)
+const spriteGenStartTime = ref<number | null>(null)
 const spriteInfo = ref<SpriteInfo | null>(null)
 const spriteImage = ref<HTMLImageElement | null>(null)
 const spriteLoaded = ref(false)
@@ -350,8 +359,10 @@ let currentVttBlobUrl: string | null = null
 
 // 检查当前视频是否正在生成雪碧图
 const isCurrentVideoGenerating = computed(() => {
-  if (!video.value || !store.spriteStatus?.videoPath) return false
-  return normalizePath(video.value.videoPath) === normalizePath(store.spriteStatus.videoPath)
+  if (!video.value) return false
+  const status = store.spriteStatusMap.get(video.value.videoPath)
+  if (!status) return false
+  return status.percent != null && status.percent < 100 && !status.error
 })
 
 function normalizePath(p: string): string {
@@ -436,6 +447,14 @@ const isBadQuality = computed({
 })
 
 const timestamps = computed(() => video.value ? playHistory.getTimestamps(video.value.id) : [])
+
+// 雪碧图生成时间相关
+const spriteGeneratedAt = computed(() =>
+  video.value ? playHistory.getSpriteGeneratedAt(video.value.id) : undefined
+)
+const spriteGenerateTime = computed(() =>
+  video.value ? playHistory.getSpriteGenerateTime(video.value.id) : undefined
+)
 
 function markTimestamp() {
   if (!player || !video.value) return
@@ -819,8 +838,7 @@ async function loadSprite() {
       spriteImage.value = img
       spriteLoaded.value = true
     }
-    img.onerror = (error) => {
-      console.error('雪碧图图片加载失败:', error)
+    img.onerror = () => {
       spriteLoaded.value = false
     }
     img.src = store.getSpriteUrl(video.value)
@@ -860,12 +878,14 @@ async function generateSpriteSheet() {
   }
 
   spriteGenerating.value = true
+  spriteGenStartTime.value = Date.now()
 
   const result = await store.generateSprite(video.value.videoPath, force)
   if (!result.success) {
     console.error('雪碧图生成失败:', result.message || '生成失败')
     alert(result.message || '生成失败')
     spriteGenerating.value = false
+    spriteGenStartTime.value = null
     return
   }
 
@@ -874,9 +894,35 @@ async function generateSpriteSheet() {
 
 // 监听 store 中的雪碧图状态变化
 function watchSpriteStatus() {
-  // 如果 store 有进度更新，清除本地的 spriteGenerating 标志
-  if (isCurrentVideoGenerating.value && store.spriteInProgress && store.spriteStatus) {
-    spriteGenerating.value = false
+  // 检测雪碧图是否完成生成
+  if (video.value) {
+    // 尝试查找匹配的状态（通过 normalizePath 确保一致）
+    let status = undefined
+    const normalizedCurrentPath = normalizePath(video.value.videoPath)
+    for (const [key, value] of store.spriteStatusMap.entries()) {
+      if (normalizePath(key) === normalizedCurrentPath) {
+        status = value
+        break
+      }
+    }
+
+    // 如果完成（100%）
+    if (status && status.percent === 100 && !status.error) {
+      // 清除生成状态
+      spriteGenerating.value = false
+      spriteGenStartTime.value = null
+
+      // 重新加载视频列表，以获取新的 spritePath
+      store.loadVideos()
+    } else if (status && status.error) {
+      // 出错时也清除开始时间
+      spriteGenerating.value = false
+      spriteGenStartTime.value = null
+      alert('雪碧图生成失败: ' + (status.errorMessage || '未知错误'))
+    } else if (status && status.percent != null && status.percent < 100) {
+      // 还在生成中，清除本地生成按钮的状态
+      spriteGenerating.value = false
+    }
   }
 }
 
@@ -897,12 +943,15 @@ watch(video, async (newVideo) => {
   if (newVideo) {
     await loadSprite()
   }
-}, { immediate: true })
+}, { immediate: true, deep: true })
 
-// 监听雪碧图状态变化
-watch([() => store.spriteInProgress, () => store.spriteStatus], () => {
+// 监听雪碧图状态变化（监听 Map 转成的数组，这样 Map 变化时能触发更新）
+watch([
+  () => store.spriteInProgress,
+  () => Array.from(store.spriteStatusMap.values())
+], () => {
   watchSpriteStatus()
-})
+}, { deep: true })
 
 watch(() => route.params.id, async (_newId, oldId) => {
   // 切换视频前保存当前视频的播放位置

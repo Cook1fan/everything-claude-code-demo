@@ -56,6 +56,8 @@ export interface VideoPlayRecord {
   videoDuration?: number; // 视频总时长（秒）
   isBadQuality?: boolean; // 质量是否不好
   lastPlaybackPosition?: number; // 最后播放位置（秒）
+  spriteGeneratedAt?: number; // 雪碧图生成时间
+  spriteGenerateTime?: number; // 雪碧图生成耗时（毫秒）
 }
 
 export interface VideoPlaySession {

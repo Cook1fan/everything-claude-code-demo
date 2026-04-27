@@ -2,43 +2,69 @@
   <AppLayout>
     <div class="flex h-full overflow-hidden">
       <!-- 侧边栏 -->
-      <aside class="w-72 bg-slate-800 border-r border-slate-700 p-4 overflow-y-auto flex flex-col">
-        <!-- 搜索框 -->
-        <div class="mb-4">
-          <input
-            v-model="store.searchQuery"
-            type="text"
-            placeholder="搜索视频..."
-            class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:border-blue-500"
-          />
+      <aside
+        v-if="sidebarOpen"
+        class="w-72 bg-slate-800 border-r border-slate-700 overflow-y-auto flex flex-col"
+      >
+        <div class="p-4 flex-1 flex flex-col">
+          <!-- 搜索框 -->
+          <div class="mb-4">
+            <input
+              v-model="store.searchQuery"
+              type="text"
+              placeholder="搜索视频..."
+              class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:border-blue-500"
+            />
+          </div>
+
+          <!-- 全部按钮 -->
+          <div class="mb-2">
+            <button
+              @click="store.selectedDirectory = ''"
+              :class="[
+                'w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-2',
+                !store.selectedDirectory ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-700'
+              ]"
+            >
+              <span>🏠</span>
+              全部视频
+            </button>
+          </div>
+
+          <!-- 目录树 -->
+          <div class="flex-1 overflow-y-auto">
+            <h3 class="text-xs font-semibold text-slate-500 mb-2 uppercase tracking-wider">目录</h3>
+            <DirectoryTree
+              :nodes="store.directoryTree"
+              :selected-path="store.selectedDirectory"
+              :expanded-paths="store.expandedNodes"
+              @toggle="store.toggleNode"
+              @select="store.selectDirectory"
+            />
+          </div>
         </div>
 
-        <!-- 全部按钮 -->
-        <div class="mb-2">
+        <!-- 折叠按钮 - 在侧边栏底部 -->
+        <div class="p-3 border-t border-slate-700">
           <button
-            @click="store.selectedDirectory = ''"
-            :class="[
-              'w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-2',
-              !store.selectedDirectory ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-700'
-            ]"
+            @click="sidebarOpen = false"
+            class="w-full px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-sm flex items-center justify-center gap-2 transition-colors"
           >
-            <span>🏠</span>
-            全部视频
+            <span>◀</span>
+            收起侧边栏
           </button>
         </div>
-
-        <!-- 目录树 -->
-        <div class="flex-1 overflow-y-auto">
-          <h3 class="text-xs font-semibold text-slate-500 mb-2 uppercase tracking-wider">目录</h3>
-          <DirectoryTree
-            :nodes="store.directoryTree"
-            :selected-path="store.selectedDirectory"
-            :expanded-paths="store.expandedNodes"
-            @toggle="store.toggleNode"
-            @select="store.selectDirectory"
-          />
-        </div>
       </aside>
+
+      <!-- 展开按钮 - 当侧边栏收起时显示在左侧 -->
+      <button
+        v-if="!sidebarOpen"
+        @click="sidebarOpen = true"
+        class="fixed left-2 top-1/2 -translate-y-1/2 z-10 bg-slate-700 hover:bg-slate-600 text-white w-10 h-10 rounded-full flex items-center justify-center shadow-lg transition-all hover:scale-110"
+        title="展开侧边栏"
+      >
+        ▶
+      </button>
 
       <!-- 主内容区 -->
       <main ref="mainContentRef" class="flex-1 overflow-y-auto p-6 flex flex-col">
@@ -48,7 +74,7 @@
             <div v-if="store.searchQuery" class="text-slate-300 text-sm">
               搜索 "<span class="text-white font-medium">{{ store.searchQuery }}</span>"
               <span class="text-slate-400 ml-2">
-                ({{ store.filteredVideos.length }} 个结果)
+                ({{ sortedVideos.length }} 个结果)
               </span>
             </div>
             <div v-else-if="store.selectedDirectory" class="flex items-center gap-2 text-sm">
@@ -61,13 +87,13 @@
               <span class="text-slate-600">/</span>
               <span class="text-slate-300">{{ getDirectoryName(store.selectedDirectory) }}</span>
               <span class="text-slate-400">
-                ({{ store.filteredVideos.length }} 个视频)
+                ({{ sortedVideos.length }} 个视频)
               </span>
             </div>
             <div v-else class="text-slate-400 text-sm">
               全部视频
               <span class="text-slate-300 ml-1">
-                ({{ store.filteredVideos.length }} 个视频)
+                ({{ sortedVideos.length }} 个视频)
               </span>
             </div>
           </div>
@@ -78,14 +104,15 @@
             <div class="flex items-center gap-2">
               <span class="text-slate-400 text-sm">排序:</span>
               <select
-                :value="store.sortMode"
-                @change="(e) => store.setSortMode((e.target as HTMLSelectElement).value as SortMode)"
+                :value="sortMode"
+                @change="handleSortModeChange"
                 class="px-3 py-1.5 bg-slate-700 border border-slate-600 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
               >
                 <option value="default">默认</option>
                 <option value="random">随机</option>
                 <option value="name">名称</option>
                 <option value="date">日期</option>
+                <option value="rating">星级</option>
               </select>
               <button
                 v-if="store.sortMode === 'random'"
@@ -97,7 +124,7 @@
             </div>
 
             <!-- 顶部分页 -->
-            <div v-if="store.totalPages > 1" class="flex items-center gap-2">
+            <div v-if="totalPages > 1" class="flex items-center gap-2">
               <button
                 @click="store.prevPage()"
                 :disabled="store.currentPage === 1"
@@ -106,11 +133,11 @@
                 ← 上一页
               </button>
               <span class="text-slate-400 text-sm">
-                {{ store.currentPage }} / {{ store.totalPages }}
+                {{ store.currentPage }} / {{ totalPages }}
               </span>
               <button
                 @click="store.nextPage()"
-                :disabled="store.currentPage === store.totalPages"
+                :disabled="store.currentPage === totalPages"
                 class="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:cursor-not-allowed text-white rounded-lg text-sm transition-colors"
               >
                 下一页 →
@@ -155,7 +182,7 @@
           </div>
 
           <!-- 底部分页控件 -->
-          <div v-if="store.totalPages > 1" class="mt-6 flex items-center justify-center gap-2">
+          <div v-if="totalPages > 1" class="mt-6 flex items-center justify-center gap-2">
             <button
               @click="store.prevPage()"
               :disabled="store.currentPage === 1"
@@ -164,14 +191,14 @@
               上一页
             </button>
             <span class="text-slate-400 px-4">
-              第 {{ store.currentPage }} / {{ store.totalPages }} 页
+              第 {{ store.currentPage }} / {{ totalPages }} 页
               <span class="text-slate-500 ml-2">
-                (共 {{ store.filteredVideos.length }} 个视频)
+                (共 {{ sortedVideos.length }} 个视频)
               </span>
             </span>
             <button
               @click="store.nextPage()"
-              :disabled="store.currentPage === store.totalPages"
+              :disabled="store.currentPage === totalPages"
               class="px-4 py-2 bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
             >
               下一页
@@ -204,20 +231,95 @@
 <script setup lang="ts">
 import { onMounted, watch, ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { useVideoStore, type SortMode } from '@/stores/videoStore'
+import { useVideoStore, type SortMode as StoreSortMode } from '@/stores/videoStore'
 import { usePlayHistoryStore } from '@/stores/playHistoryStore'
 import VideoCard from '@/components/VideoCard.vue'
 import DirectoryTree from '@/components/DirectoryTree.vue'
 import AppLayout from '@/components/AppLayout.vue'
 import type { Video } from '@/types'
 
+type SortMode = StoreSortMode | 'rating'
+
 const store = useVideoStore()
 const playHistory = usePlayHistoryStore()
 const router = useRouter()
 const mainContentRef = ref<HTMLElement | null>(null)
 
+// 从 localStorage 读取侧边栏状态
+const sidebarOpen = ref(localStorage.getItem('sidebarOpen') !== 'false')
+
+// 监听侧边栏状态变化，保存到 localStorage
+watch(sidebarOpen, (newValue) => {
+  localStorage.setItem('sidebarOpen', newValue.toString())
+})
+
+// 本地排序模式（用于支持星级排序，这个不保存到 store）
+const localSortMode = ref<SortMode>(store.sortMode)
+
+const sortMode = computed({
+  get: () => localSortMode.value,
+  set: (val: SortMode) => {
+    localSortMode.value = val
+  }
+})
+
+function handleSortModeChange(e: Event) {
+  const newMode = (e.target as HTMLSelectElement).value as SortMode
+  if (newMode === 'rating') {
+    localSortMode.value = 'rating'
+    store.goToPage(1)
+  } else {
+    localSortMode.value = newMode
+    store.setSortMode(newMode as StoreSortMode)
+  }
+}
+
+// 排序后的视频列表
+const sortedVideos = computed(() => {
+  const allVideos = store.filteredVideos
+
+  if (localSortMode.value !== 'rating') {
+    // 使用 store 的原有排序逻辑
+    return allVideos
+  }
+
+  // 星级排序：高的在前，未评分的在后
+  return [...allVideos].sort((a, b) => {
+    const ratingA = playHistory.getRating(a.id) || 0
+    const ratingB = playHistory.getRating(b.id) || 0
+
+    // 降序排序
+    if (ratingB !== ratingA) {
+      return ratingB - ratingA
+    }
+
+    // 评分相同时按名称排序
+    return a.title.localeCompare(b.title)
+  })
+})
+
+// 分页后的视频列表
+const pagedVideos = computed(() => {
+  const start = (store.currentPage - 1) * store.pageSize
+  const end = start + store.pageSize
+  return sortedVideos.value.slice(start, end)
+})
+
+// 总页数
+const totalPages = computed(() => {
+  if (localSortMode.value === 'rating') {
+    return Math.ceil(sortedVideos.value.length / store.pageSize)
+  }
+  return store.totalPages
+})
+
 // 优先显示未播放视频的分页列表
 const prioritizedPagedVideos = computed(() => {
+  // 如果是星级排序，直接返回分页后的列表
+  if (localSortMode.value === 'rating') {
+    return pagedVideos.value
+  }
+
   const allVideos = store.filteredVideos
 
   // 如果不是随机排序，直接返回原分页
@@ -247,8 +349,8 @@ const prioritizedPagedVideos = computed(() => {
   return prioritized.slice(start, end)
 })
 
-// 当搜索或目录变化时，回到第一页
-watch([() => store.searchQuery, () => store.selectedDirectory], () => {
+// 当搜索、目录或排序变化时，回到第一页
+watch([() => store.searchQuery, () => store.selectedDirectory, localSortMode], () => {
   store.goToPage(1)
 })
 
