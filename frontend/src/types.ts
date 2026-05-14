@@ -87,9 +87,12 @@ export interface SpriteInfo {
 }
 
 export interface SpriteStatus {
+  id?: string; // 任务ID
   videoPath?: string;
   videoId?: string;
   videoTitle?: string;
+  status?: 'pending' | 'running' | 'completed' | 'error' | 'aborted'; // 任务状态
+  queuePosition?: number; // 排队中的位置
   message?: string;
   percent?: number;
   frameCount?: number;
@@ -99,6 +102,10 @@ export interface SpriteStatus {
   stage?: string;
   createdAt?: number;  // 任务开始时间
   updatedAt?: number;
+  success?: boolean;
+  spritePath?: string;
+  duration?: number;
+  totalTime?: number;
 }
 
 export interface BatchSpriteStats {

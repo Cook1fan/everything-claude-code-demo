@@ -362,7 +362,7 @@ const isCurrentVideoGenerating = computed(() => {
   if (!video.value) return false
   const status = store.spriteStatusMap.get(video.value.videoPath)
   if (!status) return false
-  return status.percent != null && status.percent < 100 && !status.error
+  return (status.status === 'pending' || status.status === 'running') && !status.error
 })
 
 function normalizePath(p: string): string {
@@ -906,22 +906,21 @@ function watchSpriteStatus() {
       }
     }
 
-    // 如果完成（100%）
-    if (status && status.percent === 100 && !status.error) {
-      // 清除生成状态
-      spriteGenerating.value = false
-      spriteGenStartTime.value = null
-
-      // 重新加载视频列表，以获取新的 spritePath
-      store.loadVideos()
-    } else if (status && status.error) {
-      // 出错时也清除开始时间
-      spriteGenerating.value = false
-      spriteGenStartTime.value = null
-      alert('雪碧图生成失败: ' + (status.errorMessage || '未知错误'))
-    } else if (status && status.percent != null && status.percent < 100) {
-      // 还在生成中，清除本地生成按钮的状态
-      spriteGenerating.value = false
+    if (status) {
+      if (status.status === 'completed' && !status.error) {
+        // 完成：清除生成状态
+        spriteGenerating.value = false
+        spriteGenStartTime.value = null
+        // 注意：store.loadVideos() 会在 videoStore 中统一调用
+      } else if (status.status === 'error' || status.error) {
+        // 出错时也清除开始时间
+        spriteGenerating.value = false
+        spriteGenStartTime.value = null
+        alert('雪碧图生成失败: ' + (status.errorMessage || '未知错误'))
+      } else if ((status.status === 'pending' || status.status === 'running') && !status.error) {
+        // 还在生成中，确保生成按钮状态正确
+        spriteGenerating.value = true
+      }
     }
   }
 }
@@ -939,9 +938,19 @@ onMounted(async () => {
 })
 
 // 当视频信息加载完成后，加载雪碧图
-watch(video, async (newVideo) => {
+watch(video, async (newVideo, oldVideo) => {
   if (newVideo) {
-    await loadSprite()
+    // 如果雪碧图路径从无到有，或者发生了变化，重新加载雪碧图
+    const spritePathChanged = newVideo.spritePath !== oldVideo?.spritePath
+    if (spritePathChanged || !oldVideo) {
+      await loadSprite()
+      // 如果有播放器且有新的雪碧图，也重新加载播放器以启用缩略图预览
+      if (player && newVideo.spritePath) {
+        setTimeout(() => {
+          loadPlayer()
+        }, 100)
+      }
+    }
   }
 }, { immediate: true, deep: true })
 

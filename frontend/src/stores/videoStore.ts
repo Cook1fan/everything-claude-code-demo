@@ -31,14 +31,16 @@ export const useVideoStore = defineStore('video', () => {
   const spriteInProgressSet = ref<Set<string>>(new Set())
   const spriteStatusMap = ref<Map<string, SpriteStatus>>(new Map())
 
-  // 辅助函数：判断某个视频是否正在生成
+  // 辅助函数：判断某个视频是否正在生成或排队中
   function isSpriteInProgress(videoPath?: string): boolean {
     if (!videoPath) return false
-    return spriteInProgressSet.value.has(videoPath)
+    const status = spriteStatusMap.value.get(videoPath)
+    if (!status) return false
+    return status.status === 'pending' || status.status === 'running'
   }
 
-  // 跟踪已经处理过的雪碧图完成状态（避免重复处理）
-  const processedSpriteStatusKeys = ref<Set<string>>(new Set())
+  // 防抖定时器用于刷新视频列表
+  let refreshVideosTimer: number | null = null
 
   // 批量雪碧图生成状态
   const batchSpriteInProgress = ref(false)
@@ -76,92 +78,69 @@ export const useVideoStore = defineStore('video', () => {
         }
       }
 
-      ws.onmessage = async (event) => {
+      ws.onmessage = (event) => {
         try {
           const message = JSON.parse(event.data)
           if (message.type === 'spriteStatus') {
-            // 创建新的 Map 而不是修改现有 Map（这样才会触发响应式更新）
-            const newMap = new Map(spriteStatusMap.value)
-            const newInProgressSet = new Set<string>()
+            // 直接更新现有Map，只修改变化的
+            let hasChanges = false
 
             if (message.data.allStatus && Array.isArray(message.data.allStatus)) {
-              // 先添加/更新所有状态
+              // 添加所有状态
               for (const status of message.data.allStatus) {
                 if (status.videoPath) {
-                  // 检查这个状态是否是刚完成的（100% 且未处理过）
-                  if (status.percent === 100 && !status.error && status.videoId) {
-                    const statusKey = `${status.videoId}-${status.updatedAt || status.createdAt}`
-                    if (!processedSpriteStatusKeys.value.has(statusKey)) {
-                      // 标记为已处理
-                      processedSpriteStatusKeys.value.add(statusKey)
+                  const existingStatus = spriteStatusMap.value.get(status.videoPath)
 
-                      // 计算生成耗时
-                      let generateTime: number | undefined
-                      if (status.createdAt && status.updatedAt) {
-                        generateTime = status.updatedAt - status.createdAt
-                      }
+                  // 只有状态变化时才更新
+                  if (!existingStatus || existingStatus.status !== status.status || existingStatus.percent !== status.percent) {
+                    // 检查这个状态是否是刚完成的
+                    const justCompleted = status.status === 'completed' &&
+                      (!existingStatus || existingStatus.status !== 'completed')
+
+                    if (justCompleted) {
+                      console.log('检测到雪碧图完成:', status.videoPath, status.videoId)
 
                       // 保存到播放历史 store（持久化到 IndexedDB）
-                      try {
-                        const playHistory = usePlayHistoryStore()
-                        playHistory.setSpriteGenerated(status.videoId, generateTime)
-                      } catch (err) {
-                        console.error('保存雪碧图生成时间失败:', err)
+                      if (status.videoId) {
+                        // 计算生成耗时
+                        let generateTime: number | undefined
+                        if (status.createdAt && status.updatedAt) {
+                          generateTime = status.updatedAt - status.createdAt
+                        } else if (status.totalTime) {
+                          generateTime = status.totalTime
+                        }
+
+                        try {
+                          const playHistory = usePlayHistoryStore()
+                          playHistory.setSpriteGenerated(status.videoId, generateTime)
+                        } catch (err) {
+                          console.error('保存雪碧图生成时间失败:', err)
+                        }
                       }
+
+                      // 防抖刷新视频列表
+                      if (refreshVideosTimer) {
+                        clearTimeout(refreshVideosTimer)
+                      }
+                      refreshVideosTimer = window.setTimeout(() => {
+                        console.log('刷新视频列表...')
+                        loadVideos()
+                        refreshVideosTimer = null
+                      }, 500)
                     }
-                  }
 
-                  newMap.set(status.videoPath, status)
-                  if (status.percent != null && status.percent < 100 && !status.error) {
-                    newInProgressSet.add(status.videoPath)
-                  }
-                  // 保存到 IndexedDB
-                  try {
-                    await indexedDB.putSpriteTask(status)
-                  } catch (err) {
-                    console.error('保存雪碧图任务到 IndexedDB 失败:', err)
-                  }
-                }
-              }
-
-              // 统一清理：超过5个时优先删除最先完成的
-              const allStatuses = Array.from(newMap.values())
-              if (allStatuses.length > 5) {
-                // 分成两组：已完成的和进行中的
-                const completed = allStatuses.filter(s =>
-                  (s.percent != null && s.percent >= 100) || s.error
-                )
-                const inProgress = allStatuses.filter(s =>
-                  s.percent != null && s.percent < 100 && !s.error
-                )
-
-                // 先对已完成的按完成时间排序（最老的在前）
-                completed.sort((a, b) => (a.updatedAt || a.createdAt || 0) - (b.updatedAt || b.createdAt || 0))
-
-                // 计算需要删除多少个
-                const needToDelete = allStatuses.length - 5
-
-                // 优先删除已完成的最老的
-                const toDelete = completed.slice(0, needToDelete)
-
-                // 如果已完成的不够删，则从进行中的删除最老的（理论上不应该发生）
-                if (toDelete.length < needToDelete) {
-                  inProgress.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
-                  toDelete.push(...inProgress.slice(0, needToDelete - toDelete.length))
-                }
-
-                // 执行删除
-                for (const status of toDelete) {
-                  if (status.videoPath) {
-                    newMap.delete(status.videoPath)
+                    spriteStatusMap.value.set(status.videoPath, status)
+                    hasChanges = true
                   }
                 }
               }
             }
 
-            // 替换整个 Map 触发响应式更新
-            spriteStatusMap.value = newMap
-            spriteInProgressSet.value = newInProgressSet
+            // 只在有变化时触发响应式更新
+            if (hasChanges) {
+              // 触发响应式更新
+              spriteStatusMap.value = new Map(spriteStatusMap.value)
+            }
           } else if (message.type === 'batchSpriteStatus') {
             batchSpriteStats.value = message.data
             batchSpriteInProgress.value = message.data.isRunning
@@ -239,20 +218,23 @@ export const useVideoStore = defineStore('video', () => {
     }
   }
 
-  // 从 IndexedDB 加载雪碧图任务
-  async function loadSpriteTasksFromDB() {
+  // 从服务器拉取最新雪碧图状态
+  async function refreshSpriteStatusFromServer() {
     try {
-      const tasks = await indexedDB.getSpriteTasks()
-      for (const task of tasks) {
-        if (task.videoPath) {
-          spriteStatusMap.value.set(task.videoPath, task)
-          if (task.percent != null && task.percent < 100 && !task.error) {
-            spriteInProgressSet.value.add(task.videoPath)
+      const data = await getSpriteStatus()
+      if (data.allStatus && Array.isArray(data.allStatus)) {
+        // 完全替换为服务器状态
+        spriteStatusMap.value.clear()
+        for (const status of data.allStatus) {
+          if (status.videoPath) {
+            spriteStatusMap.value.set(status.videoPath, status)
           }
         }
+        // 触发响应式更新
+        spriteStatusMap.value = new Map(spriteStatusMap.value)
       }
     } catch (err) {
-      console.error('从 IndexedDB 加载雪碧图任务失败:', err)
+      console.error('从服务器刷新雪碧图状态失败:', err)
     }
   }
 
@@ -260,8 +242,9 @@ export const useVideoStore = defineStore('video', () => {
   async function initialize() {
     if (isInitialized.value) return
     await loadStateFromDB()
-    await loadSpriteTasksFromDB()
     connectWebSocket()
+    // 连接后立即从服务器拉取最新状态
+    await refreshSpriteStatusFromServer()
     isInitialized.value = true
   }
 
@@ -567,13 +550,18 @@ export const useVideoStore = defineStore('video', () => {
 
   // 清除所有雪碧图任务
   async function clearAllSpriteTasks() {
-    spriteStatusMap.value.clear()
-    spriteInProgressSet.value.clear()
+    // 调用后端清除已完成的任务
     try {
-      await indexedDB.clearSpriteTasks()
+      await fetch(`${API_BASE}/sprite/clear-history`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      })
     } catch (err) {
-      console.error('清除雪碧图任务失败:', err)
+      console.error('清除后端历史失败:', err)
     }
+
+    // 直接从服务器刷新最新状态
+    await refreshSpriteStatusFromServer()
   }
 
   function addToRecent(videoId: string) {
@@ -652,6 +640,7 @@ export const useVideoStore = defineStore('video', () => {
     connectWebSocket,
     disconnectWebSocket,
     clearAllSpriteTasks,
+    refreshSpriteStatusFromServer,
     shuffleArray,
     isSpriteInProgress,
   }

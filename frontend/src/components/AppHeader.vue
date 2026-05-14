@@ -37,11 +37,16 @@
               @mousedown.stop="showSpritePanel = !showSpritePanel"
               class="relative flex items-center gap-3 px-4 py-2.5 bg-slate-700/80 hover:bg-slate-600/80 rounded-xl transition-all duration-200 border border-slate-600/50 hover:border-slate-500/50"
             >
-              <div v-if="store.spriteInProgressSet.size > 0" class="relative flex items-center gap-2">
+              <div v-if="activeCount > 0 || pendingCount > 0" class="relative flex items-center gap-2">
                 <div class="w-5 h-5 border-2 border-teal-500/30 border-t-teal-400 rounded-full animate-spin"></div>
-                <span class="min-w-[24px] h-6 flex items-center justify-center text-xs bg-gradient-to-r from-teal-500 to-emerald-500 rounded-lg text-white font-bold shadow-lg">
-                  {{ store.spriteInProgressSet.size }}
-                </span>
+                <div class="flex items-center gap-1">
+                  <span v-if="activeCount > 0" class="min-w-[24px] h-6 flex items-center justify-center text-xs bg-gradient-to-r from-teal-500 to-emerald-500 rounded-lg text-white font-bold shadow-lg">
+                    {{ activeCount }}
+                  </span>
+                  <span v-if="pendingCount > 0" class="min-w-[24px] h-6 flex items-center justify-center text-xs bg-gradient-to-r from-orange-500 to-amber-500 rounded-lg text-white font-bold shadow-lg">
+                    {{ pendingCount }}
+                  </span>
+                </div>
               </div>
               <div v-else class="relative flex items-center gap-2">
                 <div class="w-5 h-5 rounded-full border-2 border-slate-500/30 flex items-center justify-center">
@@ -51,8 +56,10 @@
                   0
                 </span>
               </div>
-              <span v-if="store.spriteInProgressSet.size > 0" class="text-sm font-medium text-slate-200">
-                生成中
+              <span v-if="activeCount > 0 || pendingCount > 0" class="text-sm font-medium text-slate-200">
+                <span v-if="activeCount > 0">生成中</span>
+                <span v-if="activeCount > 0 && pendingCount > 0"> · </span>
+                <span v-if="pendingCount > 0">排队中</span>
               </span>
             </button>
 
@@ -72,7 +79,7 @@
                     @mousedown.stop="clearAllTasks"
                     class="text-xs px-2 py-0.5 bg-red-500/20 text-red-400 hover:bg-red-500/30 hover:text-red-300 rounded transition-colors"
                   >
-                    清除
+                    清除历史
                   </button>
                 </div>
                 <button
@@ -84,9 +91,15 @@
               </div>
 
               <!-- 每个视频的进度 -->
-              <div v-for="status in allSpriteStatus" :key="status.videoPath || status.videoId" class="mb-3 pb-3 border-b border-slate-700 last:border-0 last:mb-0 last:pb-0">
+              <div v-for="status in allSpriteStatus" :key="status.videoPath || status.videoId || status.id" class="mb-3 pb-3 border-b border-slate-700 last:border-0 last:mb-0 last:pb-0">
                 <div class="flex items-start gap-2">
-                  <span v-if="status.percent === 100" class="text-green-400 text-sm shrink-0">✓</span>
+                  <!-- 状态图标 -->
+                  <span v-if="status.status === 'completed'" class="text-green-400 text-sm shrink-0">✓</span>
+                  <span v-else-if="status.status === 'error'" class="text-red-400 text-sm shrink-0">✗</span>
+                  <span v-else-if="status.status === 'aborted'" class="text-slate-400 text-sm shrink-0">⏹</span>
+                  <span v-else-if="status.status === 'pending'" class="text-orange-400 text-sm shrink-0">⏳</span>
+                  <span v-else class="text-teal-400 text-sm shrink-0 animate-pulse">⚡</span>
+
                   <div class="flex-1 min-w-0">
                     <p
                       v-if="status.videoId"
@@ -103,28 +116,27 @@
                     >
                       {{ status.videoTitle || getVideoName(status.videoPath) }}
                     </p>
-                    <p v-if="status.message && status.percent !== 100" class="text-xs text-slate-400 mb-2">
+
+                    <!-- 排队位置显示 -->
+                    <p v-if="status.status === 'pending' && status.queuePosition" class="text-xs text-orange-400 mb-1">
+                      排队中 · 位置 {{ status.queuePosition }}
+                    </p>
+
+                    <!-- 状态消息 -->
+                    <p v-if="status.message && !isStatusEnded(status)" class="text-xs text-slate-400 mb-2">
                       {{ status.message }}
                     </p>
                   </div>
                 </div>
 
-                <!-- 倒计时显示（仅对刚完成的） -->
-                <div v-if="shouldShowCountdown(status)" class="mb-3">
-                  <div class="flex items-center justify-center gap-2">
-                    <div class="text-3xl font-bold text-teal-400 font-mono">
-                      {{ getCountdownForVideo(status.videoPath) }}
-                    </div>
-                    <div class="text-slate-400 text-sm">秒后刷新</div>
-                  </div>
-                </div>
+                <!-- 倒计时显示（暂时移除） -->
 
-                <!-- 进度条 + 中止按钮 -->
-                <div v-else-if="status.percent != null && status.percent < 100 && !status.error" class="mb-2">
+                <!-- 进度条 + 中止按钮（仅对进行中的任务） -->
+                <div v-if="status.status === 'running'" class="mb-2">
                   <div class="w-full bg-slate-700 rounded-full h-2 overflow-hidden mb-2">
                     <div
                       class="bg-teal-500 h-full rounded-full transition-all duration-300"
-                      :style="{ width: Math.min(100, Math.max(0, status.percent)) + '%' }"
+                      :style="{ width: Math.min(100, Math.max(0, status.percent || 0)) + '%' }"
                     ></div>
                   </div>
                   <div class="flex items-center justify-between gap-2">
@@ -144,10 +156,24 @@
                   </div>
                 </div>
 
+                <!-- 中止按钮（仅对排队中的任务） -->
+                <div v-else-if="status.status === 'pending'" class="mb-2 flex justify-end">
+                  <button
+                    @mousedown.stop="handleAbort(status.videoPath)"
+                    class="text-xs px-2 py-1 bg-slate-600/20 hover:bg-slate-600/40 text-slate-400 hover:text-slate-300 rounded transition-colors"
+                  >
+                    取消排队
+                  </button>
+                </div>
 
                 <!-- 错误提示 -->
-                <div v-else-if="status.error" class="flex items-center gap-2">
-                  <span class="text-red-400 text-sm">✗ {{ status.message || '失败' }}</span>
+                <div v-else-if="status.status === 'error'" class="flex items-center gap-2">
+                  <span class="text-red-400 text-sm">{{ status.message || '失败' }}</span>
+                </div>
+
+                <!-- 已中止提示 -->
+                <div v-else-if="status.status === 'aborted'" class="flex items-center gap-2">
+                  <span class="text-slate-400 text-sm">{{ status.message || '已中止' }}</span>
                 </div>
               </div>
             </div>
@@ -196,16 +222,36 @@ const countdownUpdateTriggers = ref<Map<string, number>>(new Map()) // 只用来
 let wasInProgressMap = markRaw(new Map<string, boolean>())
 const COUNTDOWN_SECONDS = 3
 
+// 计算运行中的任务数
+const activeCount = computed(() => {
+  return Array.from(store.spriteStatusMap.values()).filter(s => s.status === 'running').length
+})
+
+// 计算排队中的任务数
+const pendingCount = computed(() => {
+  return Array.from(store.spriteStatusMap.values()).filter(s => s.status === 'pending').length
+})
+
 // 获取所有雪碧图状态，最新的在上面，最老的在下面
 const allSpriteStatus = computed(() => {
   const statusArray = Array.from(store.spriteStatusMap.values())
-  // 按 createdAt 倒序排列，最新的在前（任务开始时间）
+  // 排序：排队中 > 运行中 > 其他（按时间倒序）
   return statusArray.sort((a, b) => {
+    const statusOrder = { pending: 0, running: 1, completed: 2, error: 3, aborted: 4 }
+    const orderA = statusOrder[a.status as keyof typeof statusOrder] ?? 5
+    const orderB = statusOrder[b.status as keyof typeof statusOrder] ?? 5
+    if (orderA !== orderB) return orderA - orderB
+    // 同状态内按时间倒序
     const timeA = a.createdAt || 0
     const timeB = b.createdAt || 0
     return timeB - timeA
   })
 })
+
+// 判断状态是否已结束
+function isStatusEnded(status: { status?: string }): boolean {
+  return status.status === 'completed' || status.status === 'error' || status.status === 'aborted'
+}
 
 // 点击外部关闭面板
 function handleClickOutside(event: MouseEvent) {
@@ -270,9 +316,9 @@ function navigateToVideo(status: { videoId?: string; videoPath?: string }) {
   router.push('/video/' + status.videoId)
 }
 
-function shouldShowCountdown(status: { videoPath?: string; percent?: number }): boolean {
+function shouldShowCountdown(status: { videoPath?: string; status?: string }): boolean {
   if (!status.videoPath) return false
-  return status.percent === 100 && countdownSecondsMap.has(status.videoPath) && countdownSecondsMap.get(status.videoPath)! > 0
+  return status.status === 'completed' && countdownSecondsMap.has(status.videoPath) && countdownSecondsMap.get(status.videoPath)! > 0
 }
 
 function getCountdownForVideo(videoPath?: string): number {
@@ -296,7 +342,7 @@ watch(() => allSpriteStatus.value, (newStatuses) => {
   for (const status of newStatuses) {
     if (!status.videoPath) continue
 
-    const isInProgress = status.percent != null && status.percent < 100 && !status.error
+    const isInProgress = status.status === 'pending' || status.status === 'running'
     const wasInProgress = wasInProgressMap.get(status.videoPath) || false
 
     // 清除倒计时
@@ -309,29 +355,32 @@ watch(() => allSpriteStatus.value, (newStatuses) => {
       countdownUpdateTriggers.value.delete(status.videoPath)
     }
 
-    // 检测从进行中变为完成
-    if (wasInProgress && !isInProgress && status.percent === 100) {
-      // 开始倒计时刷新
-      countdownSecondsMap.set(status.videoPath, COUNTDOWN_SECONDS)
-      countdownUpdateTriggers.value.set(status.videoPath, Date.now())
-
-      const vp = status.videoPath
-      const timer = window.setInterval(() => {
-        const current = countdownSecondsMap.get(vp) || 0
-        if (current <= 1) {
-          clearInterval(timer)
-          countdownTimers.delete(vp)
-          countdownSecondsMap.delete(vp)
-          countdownUpdateTriggers.value.delete(vp)
-          location.reload()
-        } else {
-          countdownSecondsMap.set(vp, current - 1)
-          countdownUpdateTriggers.value.set(vp, Date.now())
-        }
-      }, 1000)
-
-      countdownTimers.set(vp, timer)
-    }
+    // 检测从进行中变为完成 - 暂时移除自动刷新，避免历史任务导致无限刷新
+    // if (wasInProgress && !isInProgress && status.status === 'completed') {
+    //   // 只有在确实没有倒计时的情况下才开始，避免历史任务重复触发
+    //   if (!countdownTimers.has(status.videoPath) && !countdownSecondsMap.has(status.videoPath)) {
+    //     // 开始倒计时刷新
+    //     countdownSecondsMap.set(status.videoPath, COUNTDOWN_SECONDS)
+    //     countdownUpdateTriggers.value.set(status.videoPath, Date.now())
+    //
+    //     const vp = status.videoPath
+    //     const timer = window.setInterval(() => {
+    //       const current = countdownSecondsMap.get(vp) || 0
+    //       if (current <= 1) {
+    //         clearInterval(timer)
+    //         countdownTimers.delete(vp)
+    //         countdownSecondsMap.delete(vp)
+    //         countdownUpdateTriggers.value.delete(vp)
+    //         location.reload()
+    //       } else {
+    //         countdownSecondsMap.set(vp, current - 1)
+    //         countdownUpdateTriggers.value.set(vp, Date.now())
+    //       }
+    //     }, 1000)
+    //
+    //     countdownTimers.set(vp, timer)
+    //   }
+    // }
 
     wasInProgressMap.set(status.videoPath, isInProgress)
   }

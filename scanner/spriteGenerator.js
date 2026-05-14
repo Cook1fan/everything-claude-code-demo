@@ -443,11 +443,16 @@ function createVttFromJson(spritePath) {
 }
 
 // 主函数：生成视频雪碧图
-async function generateSprite(videoPath, options = {}, onProgress) {
+async function generateSprite(videoPath, options = {}, onProgress, abortController) {
   const startTime = Date.now();
   const ffmpegCheck = await checkFFmpeg();
   if (!ffmpegCheck.available) {
     throw new Error(ffmpegCheck.message || 'FFmpeg 不可用');
+  }
+
+  // 检查是否已被中止
+  if (abortController && abortController.signal.aborted) {
+    throw new Error('任务已中止');
   }
 
   const ffmpegPath = ffmpegCheck.path;
@@ -493,11 +498,26 @@ async function generateSprite(videoPath, options = {}, onProgress) {
     onProgress({ stage: 'starting', percent: 0, message: '正在初始化...' });
   }
 
+  // 设置中止监听器
+  let abortListener = null;
+  if (abortController) {
+    abortListener = () => {
+      console.log('收到 AbortController 中止信号:', path.basename(videoPath));
+      abortSpriteGeneration(videoPath);
+    };
+    abortController.signal.addEventListener('abort', abortListener);
+  }
+
   let tempDir = null;
   try {
 
     const duration = await getVideoDuration(ffmpegPath, videoPath);
     console.log('视频时长:', duration, '秒');
+
+    // 再次检查是否已被中止
+    if (abortController && abortController.signal.aborted) {
+      throw new Error('任务已中止');
+    }
 
     const interval = calculateOptimalInterval(duration, configInterval);
     tempDir = createTempDir(); // 使用系统临时目录
@@ -513,6 +533,11 @@ async function generateSprite(videoPath, options = {}, onProgress) {
       onProgress
     );
 
+    // 再次检查是否已被中止
+    if (abortController && abortController.signal.aborted) {
+      throw new Error('任务已中止');
+    }
+
     const framePaths = extractResult.framePaths;
     const actualInterval = extractResult.interval;
     console.log('最终提取到', framePaths.length, '帧');
@@ -523,6 +548,15 @@ async function generateSprite(videoPath, options = {}, onProgress) {
 
     console.log('正在生成雪碧图...');
     await createSprite(ffmpegPath, framePaths, outputPath, columns, thumbnailWidth, onProgress);
+
+    // 再次检查是否已被中止
+    if (abortController && abortController.signal.aborted) {
+      // 清理已生成的文件
+      if (fs.existsSync(outputPath)) {
+        fs.unlinkSync(outputPath);
+      }
+      throw new Error('任务已中止');
+    }
 
     if (onProgress) {
       onProgress({ stage: 'saving', percent: 99.8, message: '正在保存信息文件...' });
@@ -552,6 +586,10 @@ async function generateSprite(videoPath, options = {}, onProgress) {
     }
     throw error;
   } finally {
+    // 移除中止监听器
+    if (abortController && abortListener) {
+      abortController.signal.removeEventListener('abort', abortListener);
+    }
     if (tempDir) {
       cleanupTempDir(tempDir);
     }

@@ -1,5 +1,6 @@
 const WebSocket = require('ws');
 const { getVideoTitleByPath } = require('./middleware/video-info');
+const SpriteTaskSemaphore = require('./SpriteTaskSemaphore');
 
 let wss = null;
 const clients = new Set();
@@ -7,15 +8,19 @@ const clients = new Set();
 let broadcastTimeout = null;
 let pendingBroadcast = false;
 
-// 雪碧图生成状态 - 支持多个同时生成
-let spriteGenerationInProgressSet = new Set();
-let spriteGenerationStatusMap = new Map();
+// 雪碧图生成 Semaphore - 5个并发，其余排队
+const spriteSemaphore = new SpriteTaskSemaphore(5);
 
 // 批量雪碧图生成状态
 let batchThreadPool = null;
 
 function initWebSocket(server) {
   wss = new WebSocket.Server({ server });
+
+  // 监听 Semaphore 状态变化，自动广播
+  spriteSemaphore.on('statusChanged', () => {
+    broadcastSpriteStatus();
+  });
 
   wss.on('connection', (ws) => {
     clients.add(ws);
@@ -48,11 +53,15 @@ function broadcastSpriteStatus() {
 }
 
 function doBroadcast() {
-  const allStatus = Array.from(spriteGenerationStatusMap.values());
+  const allStatus = spriteSemaphore.getAllStatuses().map(status => ({
+    ...status,
+    videoTitle: status.videoTitle || (status.videoPath ? getVideoTitleByPath(status.videoPath) : undefined)
+  }));
   const message = JSON.stringify({
     type: 'spriteStatus',
     data: {
-      inProgress: spriteGenerationInProgressSet.size > 0,
+      inProgress: spriteSemaphore.getActiveCount() > 0,
+      queueLength: spriteSemaphore.getQueueLength(),
       allStatus: allStatus
     }
   });
@@ -88,14 +97,15 @@ function broadcastScanStatus(status) {
 }
 
 function sendSpriteStatusToClient(ws) {
-  const allStatus = Array.from(spriteGenerationStatusMap.values()).map(status => ({
+  const allStatus = spriteSemaphore.getAllStatuses().map(status => ({
     ...status,
     videoTitle: status.videoTitle || (status.videoPath ? getVideoTitleByPath(status.videoPath) : undefined)
   }));
   const message = JSON.stringify({
     type: 'spriteStatus',
     data: {
-      inProgress: spriteGenerationInProgressSet.size > 0,
+      inProgress: spriteSemaphore.getActiveCount() > 0,
+      queueLength: spriteSemaphore.getQueueLength(),
       allStatus: allStatus
     }
   });
@@ -114,16 +124,8 @@ function sendSpriteStatusToClient(ws) {
   }
 }
 
-function getSpriteGenerationInProgressSet() {
-  return spriteGenerationInProgressSet;
-}
-
-function getSpriteGenerationStatusMap() {
-  return spriteGenerationStatusMap;
-}
-
-function setBatchThreadPool(pool) {
-  batchThreadPool = pool;
+function getSpriteSemaphore() {
+  return spriteSemaphore;
 }
 
 function setBatchThreadPool(pool) {
@@ -134,14 +136,38 @@ function getBatchThreadPool() {
   return batchThreadPool;
 }
 
+// 向后兼容的函数 - 标记为 deprecated
+function getSpriteGenerationInProgressSet() {
+  console.warn('[DEPRECATED] getSpriteGenerationInProgressSet is deprecated, use getSpriteSemaphore');
+  // 返回一个模拟的 Set
+  const mockSet = new Set();
+  for (const status of spriteSemaphore.getAllStatuses()) {
+    if (status.status === 'running') {
+      mockSet.add(status.videoPath);
+    }
+  }
+  return mockSet;
+}
+
+function getSpriteGenerationStatusMap() {
+  console.warn('[DEPRECATED] getSpriteGenerationStatusMap is deprecated, use getSpriteSemaphore');
+  // 返回一个模拟的 Map
+  const mockMap = new Map();
+  for (const status of spriteSemaphore.getAllStatuses()) {
+    mockMap.set(status.videoPath, status);
+  }
+  return mockMap;
+}
+
 module.exports = {
   initWebSocket,
   broadcastSpriteStatus,
   broadcastBatchSpriteStatus,
   broadcastScanStatus,
   sendSpriteStatusToClient,
-  getSpriteGenerationInProgressSet,
-  getSpriteGenerationStatusMap,
+  getSpriteSemaphore,
+  getSpriteGenerationInProgressSet, // 向后兼容
+  getSpriteGenerationStatusMap,     // 向后兼容
   setBatchThreadPool,
   getBatchThreadPool
 };

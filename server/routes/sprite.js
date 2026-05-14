@@ -9,17 +9,15 @@ const { isPathAllowed, normalizePath } = require('../middleware/path');
 const { getVideoData, clearVideoDataCache } = require('../middleware/cache');
 const { getVideoIdByPath, getVideoTitleByPath } = require('../middleware/video-info');
 const {
-  getSpriteGenerationInProgressSet,
-  getSpriteGenerationStatusMap,
+  getSpriteSemaphore,
   getBatchThreadPool,
   setBatchThreadPool,
-  broadcastSpriteStatus,
   broadcastBatchSpriteStatus
 } = require('../websocket');
 
 const router = express.Router();
 
-// API: 生成雪碧图（支持多个同时生成）
+// API: 生成雪碧图（加入队列排队）
 router.post('/generate', async (req, res) => {
   const videoPath = req.body.path;
   const force = req.body.force || false;
@@ -46,94 +44,23 @@ router.post('/generate', async (req, res) => {
     });
   }
 
-  const spriteGenerationInProgressSet = getSpriteGenerationInProgressSet();
-  const spriteGenerationStatusMap = getSpriteGenerationStatusMap();
+  const semaphore = getSpriteSemaphore();
 
-  // 如果这个视频已经在生成中，不重复生成
-  if (spriteGenerationInProgressSet.has(resolvedPath)) {
-    return res.json({ success: false, message: '这个视频正在生成中' });
+  // 检查视频是否已经在队列中或正在运行
+  if (semaphore.isVideoInQueueOrRunning(resolvedPath)) {
+    return res.json({ success: false, message: '这个视频已在队列中或正在生成' });
   }
 
-  // 检查正在运行的任务数量，最多5个
-  const inProgressCount = spriteGenerationInProgressSet.size;
-  if (inProgressCount >= 5) {
-    return res.json({ success: false, message: '正在生成的任务已达5个，请稍后再试' });
-  }
+  // 清理旧状态，已结束的最多保留10个，排队和运行中的全部保留
+  semaphore.cleanupOldStatuses(10);
 
-  // 确保最多5个任务，超过就删除最先完成的（优先删除已完成的）
-  const allStatuses = Array.from(spriteGenerationStatusMap.values());
-  if (allStatuses.length >= 5) {
-    // 分成已完成和进行中
-    const completedStatuses = allStatuses.filter(s =>
-      s.videoPath && !spriteGenerationInProgressSet.has(s.videoPath)
-    );
-    const inProgressStatuses = allStatuses.filter(s =>
-      s.videoPath && spriteGenerationInProgressSet.has(s.videoPath)
-    );
-
-    // 优先删除已完成的，按完成时间（updatedAt）从老到新
-    completedStatuses.sort((a, b) => (a.updatedAt || a.createdAt || 0) - (b.updatedAt || b.createdAt || 0));
-    let needToDelete = allStatuses.length - 5 + 1; // 腾位置给新任务，保持最多5个（现有5个+新1个=6个，删1个）
-    for (const status of completedStatuses) {
-      if (needToDelete <= 0) break;
-      if (status.videoPath) {
-        spriteGenerationStatusMap.delete(status.videoPath);
-        needToDelete--;
-      }
-    }
-
-    // 如果还需要删除，就连进行中的一起删（最老的）
-    if (needToDelete > 0) {
-      inProgressStatuses.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
-      for (const status of inProgressStatuses) {
-        if (needToDelete <= 0) break;
-        if (status.videoPath) {
-          spriteGenerationStatusMap.delete(status.videoPath);
-          spriteGenerationInProgressSet.delete(status.videoPath);
-          needToDelete--;
-        }
-      }
-    }
-  }
-
-  // 标记为生成中
-  spriteGenerationInProgressSet.add(resolvedPath);
-  const initialStatus = {
-    videoPath: resolvedPath,
-    videoId: getVideoIdByPath(resolvedPath),
-    videoTitle: getVideoTitleByPath(resolvedPath),
-    percent: 0,
-    message: '开始生成...',
-    createdAt: Date.now()
-  };
-  spriteGenerationStatusMap.set(resolvedPath, initialStatus);
-
-  // 广播状态 - 发送所有正在生成的状态
-  broadcastSpriteStatus();
-
-  res.json({ success: true, message: '雪碧图生成已开始' });
-
-  // 异步执行生成
-  (async () => {
-    try {
-      const result = await generateSprite(resolvedPath, { force }, (progress) => {
-        const existingStatus = spriteGenerationStatusMap.get(resolvedPath);
-        const status = {
-          videoPath: resolvedPath,
-          videoId: getVideoIdByPath(resolvedPath),
-          videoTitle: getVideoTitleByPath(resolvedPath),
-          percent: progress.percent || 0,
-          message: progress.message || '处理中...',
-          stage: progress.stage,
-          frameCount: progress.frameCount,
-          totalFrames: progress.totalFrames,
-          createdAt: existingStatus?.createdAt || Date.now(),
-          updatedAt: Date.now()
-        };
-        spriteGenerationStatusMap.set(resolvedPath, status);
-        console.log('进度更新:', path.basename(resolvedPath), status.percent + '%', status.message);
-        broadcastSpriteStatus();
-      });
+  // 提交任务到队列
+  const taskId = semaphore.submit(
+    resolvedPath,
+    { force },
+    async (abortController, onProgress) => {
+      // 实际执行生成的函数
+      const result = await generateSprite(resolvedPath, { force }, onProgress, abortController);
 
       // 更新 videos.json 添加雪碧图路径和 VTT 路径
       const dataPath = path.resolve(config.outputPath);
@@ -149,50 +76,36 @@ router.post('/generate', async (req, res) => {
         }
       }
 
-      const existingStatus = spriteGenerationStatusMap.get(resolvedPath);
-      const finalStatus = {
-        ...result,
-        videoPath: resolvedPath,
-        videoId: getVideoIdByPath(resolvedPath),
-        videoTitle: getVideoTitleByPath(resolvedPath),
-        percent: 100,
-        createdAt: existingStatus?.createdAt || Date.now(),
-        updatedAt: Date.now()
-      };
-      spriteGenerationStatusMap.set(resolvedPath, finalStatus);
-      broadcastSpriteStatus();
-
-      // 等待1秒，确保前端收到最后的100%更新
+      // 短暂延迟，确保前端收到 100% 的更新
       await new Promise(resolve => setTimeout(resolve, 1000));
-    } catch (err) {
-      console.error('生成雪碧图失败:', err);
-      const existingStatus = spriteGenerationStatusMap.get(resolvedPath);
-      const errorStatus = {
-        error: true,
-        videoPath: resolvedPath,
-        videoId: getVideoIdByPath(resolvedPath),
-        videoTitle: getVideoTitleByPath(resolvedPath),
-        message: '生成失败: ' + err.message,
-        createdAt: existingStatus?.createdAt || Date.now(),
-        updatedAt: Date.now()
-      };
-      spriteGenerationStatusMap.set(resolvedPath, errorStatus);
-      broadcastSpriteStatus();
-    } finally {
-      spriteGenerationInProgressSet.delete(resolvedPath);
-      broadcastSpriteStatus();
+
+      return result;
+    },
+    {
+      videoId: getVideoIdByPath(resolvedPath),
+      videoTitle: getVideoTitleByPath(resolvedPath)
     }
-  })();
+  );
+
+  const status = semaphore.getStatusByVideoPath(resolvedPath);
+  res.json({
+    success: true,
+    message: status.queuePosition ? `已加入队列，位置 ${status.queuePosition}` : '雪碧图生成已开始',
+    taskId,
+    queuePosition: status.queuePosition
+  });
 });
 
 // API: 获取雪碧图生成状态
 router.get('/status', (req, res) => {
-  const allStatus = Array.from(getSpriteGenerationStatusMap().values()).map(status => ({
+  const semaphore = getSpriteSemaphore();
+  const allStatus = semaphore.getAllStatuses().map(status => ({
     ...status,
     videoTitle: status.videoTitle || (status.videoPath ? getVideoTitleByPath(status.videoPath) : undefined)
   }));
   res.json({
-    inProgress: getSpriteGenerationInProgressSet().size > 0,
+    inProgress: semaphore.getActiveCount() > 0,
+    queueLength: semaphore.getQueueLength(),
     allStatus: allStatus
   });
 });
@@ -227,7 +140,6 @@ router.get('/info', (req, res) => {
 router.post('/batch-generate', async (req, res) => {
   const videoPaths = req.body.paths;
   const force = req.body.force || false;
-  // 限制线程池大小：至少1个，最多CPU核心数
   const maxPoolSize = os.cpus().length;
   const poolSize = Math.max(1, Math.min(req.body.poolSize || (maxPoolSize - 1 || 1), maxPoolSize));
 
@@ -235,8 +147,10 @@ router.post('/batch-generate', async (req, res) => {
     return res.status(400).json({ error: '缺少 paths 参数或为空数组' });
   }
 
+  const semaphore = getSpriteSemaphore();
   const batchIsRunning = getBatchThreadPool() && getBatchThreadPool().isRunning === true;
-  if (getSpriteGenerationInProgressSet().size > 0 || batchIsRunning) {
+
+  if (semaphore.getActiveCount() > 0 || semaphore.getQueueLength() > 0 || batchIsRunning) {
     return res.json({ success: false, message: '正在生成其他雪碧图，请稍候...' });
   }
 
@@ -344,36 +258,21 @@ router.get('/batch-status', (req, res) => {
   });
 });
 
-// API: 中止单个视频的雪碧图生成
+// API: 中止单个视频的雪碧图生成（支持任务ID或视频路径）
 router.post('/abort', (req, res) => {
-  const videoPath = req.body.path;
-  if (!videoPath) {
-    return res.status(400).json({ error: '缺少 path 参数' });
+  const taskIdOrPath = req.body.taskId || req.body.path;
+  if (!taskIdOrPath) {
+    return res.status(400).json({ error: '缺少 taskId 或 path 参数' });
   }
 
-  const resolvedPath = path.resolve(videoPath);
-  const result = abortSpriteGeneration(resolvedPath);
+  const semaphore = getSpriteSemaphore();
+  const success = semaphore.abort(taskIdOrPath);
 
-  // 同时清理状态
-  const spriteGenerationInProgressSet = getSpriteGenerationInProgressSet();
-  const spriteGenerationStatusMap = getSpriteGenerationStatusMap();
-
-  if (spriteGenerationInProgressSet.has(resolvedPath)) {
-    spriteGenerationInProgressSet.delete(resolvedPath);
+  if (success) {
+    res.json({ success: true, message: '已发送中止信号' });
+  } else {
+    res.json({ success: false, message: '未找到可中止的任务' });
   }
-
-  const status = spriteGenerationStatusMap.get(resolvedPath);
-  if (status) {
-    spriteGenerationStatusMap.set(resolvedPath, {
-      ...status,
-      error: true,
-      message: '已中止',
-      updatedAt: Date.now()
-    });
-    broadcastSpriteStatus();
-  }
-
-  res.json(result);
 });
 
 // API: 中止批量生成
@@ -385,6 +284,13 @@ router.post('/batch-abort', (req, res) => {
 
   batchThreadPool.abort();
   res.json({ success: true, message: '已发送中止信号' });
+});
+
+// API: 清除所有已完成的历史任务
+router.post('/clear-history', (req, res) => {
+  const semaphore = getSpriteSemaphore();
+  semaphore.clearCompletedTasks();
+  res.json({ success: true, message: '已清除历史任务' });
 });
 
 module.exports = router;
