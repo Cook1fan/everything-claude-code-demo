@@ -4,18 +4,32 @@ const path = require('path');
 const os = require('os');
 const config = require('./config');
 
+// 跟踪正在运行的 FFmpeg 进程
+const runningProcesses = new Map(); // videoPath -> { ffmpegProc, tempDir, abortFlag }
+
 // 根据视频时长动态计算最佳帧间隔
-// 行业通用方案：＜10分钟3秒一帧，10分钟～2小时5秒一帧，＞2小时10秒一帧
+// 表格规则：
+// <30 分钟     → 5 秒
+// 30分钟-1小时 → 8 秒
+// 1-3 小时     → 10 秒
+// 3-6 小时     → 15 秒
+// 6-8 小时     → 20 秒
+// >8 小时      → 20 秒 (8小时上限)
 function calculateOptimalInterval(duration, configInterval = 10) {
   const minutes = duration / 60;
+  const hours = minutes / 60;
   let interval;
 
-  if (minutes < 10) {
-    interval = 3;
-  } else if (minutes <= 120) { // 10分钟～2小时
+  if (minutes < 30) {
     interval = 5;
-  } else {
+  } else if (minutes <= 60) { // 30分钟 - 1小时
+    interval = 8;
+  } else if (hours <= 3) { // 1-3小时
     interval = 10;
+  } else if (hours <= 6) { // 3-6小时
+    interval = 15;
+  } else { // 6小时以上
+    interval = 20;
   }
 
   const estimatedFrames = Math.ceil(duration / interval);
@@ -146,8 +160,18 @@ function extractFrames(ffmpegPath, videoPath, tempDir, interval, duration, thumb
     let lastFrameCount = 0;
     let stuckCount = 0;
     const maxStuckCount = 120;
+    let aborted = false;
 
     const proc = execFile(ffmpegPath, args, (error, stdout, stderr) => {
+      // 清理进程跟踪
+      runningProcesses.delete(videoPath);
+
+      if (aborted) {
+        console.log('任务已中止:', path.basename(videoPath));
+        reject(new Error('任务已中止'));
+        return;
+      }
+
       if (error) {
         console.log('FFmpeg返回错误:', error.message);
         extractError = error;
@@ -188,7 +212,27 @@ function extractFrames(ffmpegPath, videoPath, tempDir, interval, duration, thumb
       }
     });
 
+    // 跟踪这个进程
+    runningProcesses.set(videoPath, { ffmpegProc: proc, tempDir, abortFlag: false });
+
     frameCheckInterval = setInterval(() => {
+      // 检查是否被中止
+      const procInfo = runningProcesses.get(videoPath);
+      if (procInfo && procInfo.abortFlag) {
+        console.log('检测到中止信号，正在终止 FFmpeg...');
+        aborted = true;
+        try {
+          proc.kill();
+        } catch (e) {
+          console.log('终止进程失败:', e.message);
+        }
+        if (frameCheckInterval) {
+          clearInterval(frameCheckInterval);
+          frameCheckInterval = null;
+        }
+        return;
+      }
+
       try {
         let frames = [];
         if (fs.existsSync(tempDir)) {
@@ -234,6 +278,28 @@ function extractFrames(ffmpegPath, videoPath, tempDir, interval, duration, thumb
       }
     });
   });
+}
+
+// 中止单个视频的雪碧图生成
+function abortSpriteGeneration(videoPath) {
+  const procInfo = runningProcesses.get(videoPath);
+  if (!procInfo) {
+    return { success: false, message: '没有找到正在运行的任务' };
+  }
+
+  console.log('正在中止雪碧图生成:', path.basename(videoPath));
+  procInfo.abortFlag = true;
+
+  // 尝试直接终止进程
+  try {
+    if (procInfo.ffmpegProc) {
+      procInfo.ffmpegProc.kill();
+    }
+  } catch (e) {
+    console.log('终止 FFmpeg 进程失败:', e.message);
+  }
+
+  return { success: true, message: '已发送中止信号' };
 }
 
 // 使用 FFmpeg 合并帧为雪碧图
@@ -496,5 +562,6 @@ module.exports = {
   checkFFmpeg,
   generateSprite,
   getVideoDuration,
-  createVttFromJson
+  createVttFromJson,
+  abortSpriteGeneration
 };

@@ -31,6 +31,12 @@ export const useVideoStore = defineStore('video', () => {
   const spriteInProgressSet = ref<Set<string>>(new Set())
   const spriteStatusMap = ref<Map<string, SpriteStatus>>(new Map())
 
+  // 辅助函数：判断某个视频是否正在生成
+  function isSpriteInProgress(videoPath?: string): boolean {
+    if (!videoPath) return false
+    return spriteInProgressSet.value.has(videoPath)
+  }
+
   // 跟踪已经处理过的雪碧图完成状态（避免重复处理）
   const processedSpriteStatusKeys = ref<Set<string>>(new Set())
 
@@ -527,6 +533,20 @@ export const useVideoStore = defineStore('video', () => {
     }
   }
 
+  async function abortSprite(videoPath: string) {
+    try {
+      const res = await fetch(`${API_BASE}/sprite/abort`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: videoPath }),
+      })
+      return await res.json()
+    } catch (err) {
+      console.error('中止雪碧图生成失败:', err)
+      return { success: false, message: '请求失败' }
+    }
+  }
+
   async function deleteDirectory(dirPath: string) {
     try {
       const res = await fetch(`${API_BASE}/delete-directory`, {
@@ -625,6 +645,7 @@ export const useVideoStore = defineStore('video', () => {
     batchGenerateSprites,
     getBatchSpriteStatus,
     abortBatchSprites,
+    abortSprite,
     deleteDirectory,
     addToRecent,
     formatFileSize,
@@ -632,5 +653,6 @@ export const useVideoStore = defineStore('video', () => {
     disconnectWebSocket,
     clearAllSpriteTasks,
     shuffleArray,
+    isSpriteInProgress,
   }
 })

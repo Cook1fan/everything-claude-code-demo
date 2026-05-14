@@ -119,19 +119,28 @@
                   </div>
                 </div>
 
-                <!-- 进度条 -->
-                <div v-else-if="status.percent != null && status.percent < 100" class="mb-2">
-                  <div class="w-full bg-slate-700 rounded-full h-2 overflow-hidden">
+                <!-- 进度条 + 中止按钮 -->
+                <div v-else-if="status.percent != null && status.percent < 100 && !status.error" class="mb-2">
+                  <div class="w-full bg-slate-700 rounded-full h-2 overflow-hidden mb-2">
                     <div
                       class="bg-teal-500 h-full rounded-full transition-all duration-300"
                       :style="{ width: Math.min(100, Math.max(0, status.percent)) + '%' }"
                     ></div>
                   </div>
-                  <div class="flex justify-between mt-1 text-xs text-slate-400">
-                    <span>{{ Math.min(100, Math.max(0, status.percent || 0)) }}%</span>
-                    <span v-if="status.frameCount">
-                      {{ status.frameCount }} / {{ status.totalFrames }} 帧
-                    </span>
+                  <div class="flex items-center justify-between gap-2">
+                    <div class="flex items-center gap-2 text-xs text-slate-400">
+                      <span>{{ Math.min(100, Math.max(0, status.percent || 0)) }}%</span>
+                      <span v-if="status.frameCount">
+                        {{ status.frameCount }} / {{ status.totalFrames }} 帧
+                      </span>
+                    </div>
+                    <!-- 显示中止按钮 -->
+                    <button
+                      @mousedown.stop="handleAbort(status.videoPath)"
+                      class="text-xs px-2 py-1 bg-red-600/20 hover:bg-red-600/40 text-red-400 hover:text-red-300 rounded transition-colors"
+                    >
+                      中止
+                    </button>
                   </div>
                 </div>
 
@@ -275,6 +284,11 @@ function getCountdownForVideo(videoPath?: string): number {
 
 function clearAllTasks() {
   store.clearAllSpriteTasks()
+}
+
+async function handleAbort(videoPath?: string) {
+  if (!videoPath) return
+  await store.abortSprite(videoPath)
 }
 
 // 当开始生成时自动显示面板，处理倒计时

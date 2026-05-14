@@ -2,7 +2,7 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
-const { checkFFmpeg, generateSprite } = require('../../scanner/spriteGenerator');
+const { checkFFmpeg, generateSprite, abortSpriteGeneration } = require('../../scanner/spriteGenerator');
 const SpriteThreadPool = require('../../scanner/spriteThreadPool');
 const config = require('../../scanner/config');
 const { isPathAllowed, normalizePath } = require('../middleware/path');
@@ -342,6 +342,38 @@ router.get('/batch-status', (req, res) => {
     isRunning: batchThreadPool.isRunning,
     stats: batchThreadPool.getStats()
   });
+});
+
+// API: 中止单个视频的雪碧图生成
+router.post('/abort', (req, res) => {
+  const videoPath = req.body.path;
+  if (!videoPath) {
+    return res.status(400).json({ error: '缺少 path 参数' });
+  }
+
+  const resolvedPath = path.resolve(videoPath);
+  const result = abortSpriteGeneration(resolvedPath);
+
+  // 同时清理状态
+  const spriteGenerationInProgressSet = getSpriteGenerationInProgressSet();
+  const spriteGenerationStatusMap = getSpriteGenerationStatusMap();
+
+  if (spriteGenerationInProgressSet.has(resolvedPath)) {
+    spriteGenerationInProgressSet.delete(resolvedPath);
+  }
+
+  const status = spriteGenerationStatusMap.get(resolvedPath);
+  if (status) {
+    spriteGenerationStatusMap.set(resolvedPath, {
+      ...status,
+      error: true,
+      message: '已中止',
+      updatedAt: Date.now()
+    });
+    broadcastSpriteStatus();
+  }
+
+  res.json(result);
 });
 
 // API: 中止批量生成
