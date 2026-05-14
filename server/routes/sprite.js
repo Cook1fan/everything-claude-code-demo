@@ -19,21 +19,6 @@ const {
 
 const router = express.Router();
 
-// API: 检查 FFmpeg 状态
-router.get('/ffmpeg/status', async (req, res) => {
-  try {
-    const status = await checkFFmpeg();
-    res.json(status);
-  } catch (err) {
-    console.error('检查 FFmpeg 失败:', err);
-    res.json({
-      available: false,
-      path: null,
-      message: '检查 FFmpeg 时出错: ' + err.message
-    });
-  }
-});
-
 // API: 生成雪碧图（支持多个同时生成）
 router.post('/generate', async (req, res) => {
   const videoPath = req.body.path;

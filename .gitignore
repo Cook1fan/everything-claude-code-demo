@@ -24,6 +24,9 @@ Thumbs.db
 data/*.json
 !data/.gitkeep
 
+# Config (contains local paths)
+scanner/config.js
+
 # Logs
 *.log
 npm-debug.log*

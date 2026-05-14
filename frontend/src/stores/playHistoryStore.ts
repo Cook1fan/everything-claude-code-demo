@@ -402,10 +402,15 @@ export const usePlayHistoryStore = defineStore('playHistory', () => {
       .sort((a, b) => (b.lastPlayedAt || 0) - (a.lastPlayedAt || 0))
   }
 
-  // 清除单个视频的播放记录
-  async function clearRecord(videoId: string) {
+  // 删除单个视频的播放记录 (同 clearRecord，别名)
+  async function deleteRecord(videoId: string) {
     playRecords.value.delete(videoId)
     await indexedDB.deleteRecord(videoId)
+  }
+
+  // 清除单个视频的播放记录
+  async function clearRecord(videoId: string) {
+    await deleteRecord(videoId)
   }
 
   // 清除所有播放记录
@@ -438,6 +443,7 @@ export const usePlayHistoryStore = defineStore('playHistory', () => {
     formatPlayTime,
     formatTimestamp,
     getAllRecords,
+    deleteRecord,
     clearRecord,
     clearAllRecords,
     resetPlayCountMarker,

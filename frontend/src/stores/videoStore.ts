@@ -527,6 +527,24 @@ export const useVideoStore = defineStore('video', () => {
     }
   }
 
+  async function deleteDirectory(dirPath: string) {
+    try {
+      const res = await fetch(`${API_BASE}/delete-directory`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: dirPath }),
+      })
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.error || '删除失败')
+      }
+      return await res.json()
+    } catch (err) {
+      console.error('删除目录失败:', err)
+      throw err
+    }
+  }
+
   // 清除所有雪碧图任务
   async function clearAllSpriteTasks() {
     spriteStatusMap.value.clear()
@@ -607,6 +625,7 @@ export const useVideoStore = defineStore('video', () => {
     batchGenerateSprites,
     getBatchSpriteStatus,
     abortBatchSprites,
+    deleteDirectory,
     addToRecent,
     formatFileSize,
     connectWebSocket,

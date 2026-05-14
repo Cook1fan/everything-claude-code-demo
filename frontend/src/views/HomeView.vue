@@ -178,6 +178,7 @@
               :key="video.id"
               :video="video"
               @click="playVideo(video)"
+              @delete="handleDeleteVideo(video)"
             />
           </div>
 
@@ -225,6 +226,14 @@
         ↓
       </button>
     </div>
+
+    <!-- 删除确认对话框 -->
+    <DeleteConfirmDialog
+      ref="deleteConfirmDialogRef"
+      v-model:show="showDeleteDialog"
+      :directory-path="deletingDirectory || ''"
+      @confirm="confirmDelete"
+    />
   </AppLayout>
 </template>
 
@@ -236,6 +245,7 @@ import { usePlayHistoryStore } from '@/stores/playHistoryStore'
 import VideoCard from '@/components/VideoCard.vue'
 import DirectoryTree from '@/components/DirectoryTree.vue'
 import AppLayout from '@/components/AppLayout.vue'
+import DeleteConfirmDialog from '@/components/DeleteConfirmDialog.vue'
 import type { Video } from '@/types'
 
 type SortMode = StoreSortMode | 'rating'
@@ -388,5 +398,56 @@ function playVideo(video: Video) {
 function getDirectoryName(path: string) {
   const parts = path.split('/')
   return parts[parts.length - 1] || path
+}
+
+// 删除功能
+const showDeleteDialog = ref(false)
+const deletingDirectory = ref<string | null>(null)
+const deleteConfirmDialogRef = ref<InstanceType<typeof DeleteConfirmDialog> | null>(null)
+
+function handleDeleteVideo(video: Video) {
+  deletingDirectory.value = video.directory
+  showDeleteDialog.value = true
+}
+
+async function confirmDelete() {
+  if (!deletingDirectory.value) return
+
+  if (deleteConfirmDialogRef.value) {
+    deleteConfirmDialogRef.value.setDeleting(true)
+  }
+
+  try {
+    // 先获取该目录及其子目录下的所有视频ID，以便清除播放历史
+    const normalizedDir = deletingDirectory.value
+    const videoIdsToDelete = store.videos
+      .filter(v => {
+        const videoDir = v.directory
+        return videoDir === normalizedDir ||
+               videoDir.startsWith(normalizedDir + '/')
+      })
+      .map(v => v.id)
+
+    // 删除目录
+    await store.deleteDirectory(deletingDirectory.value)
+
+    // 清除播放历史
+    for (const id of videoIdsToDelete) {
+      await playHistory.deleteRecord(id)
+    }
+
+    // 重新加载视频列表
+    await store.loadVideos()
+
+    showDeleteDialog.value = false
+    deletingDirectory.value = null
+  } catch (err) {
+    console.error('删除失败:', err)
+    alert(err instanceof Error ? err.message : '删除失败，请检查控制台')
+  } finally {
+    if (deleteConfirmDialogRef.value) {
+      deleteConfirmDialogRef.value.setDeleting(false)
+    }
+  }
 }
 </script>

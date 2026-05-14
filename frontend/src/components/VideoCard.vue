@@ -1,10 +1,10 @@
 <template>
-  <div
-    @click="$emit('click', video)"
-    class="group cursor-pointer bg-slate-800 rounded-xl overflow-hidden hover:ring-2 hover:ring-blue-500 transition-all duration-200"
-  >
+  <div class="group bg-slate-800 rounded-xl overflow-hidden hover:ring-2 hover:ring-blue-500 transition-all duration-200">
     <!-- 海报区域 -->
-    <div class="aspect-video bg-slate-700 relative overflow-hidden">
+    <div
+      @click="$emit('click', video)"
+      class="aspect-video bg-slate-700 relative overflow-hidden cursor-pointer"
+    >
       <!-- 加载占位 -->
       <div
         v-if="posterUrl && !imageLoaded && !imageError"
@@ -89,6 +89,17 @@
           />
         </div>
       </div>
+
+      <!-- 删除按钮 -->
+      <div class="mt-3 pt-3 border-t border-slate-700">
+        <button
+          @click.stop="$emit('delete', video)"
+          class="w-full px-3 py-1.5 bg-red-600/20 hover:bg-red-600/40 text-red-400 hover:text-red-300 rounded-lg text-xs transition-colors flex items-center justify-center gap-1.5"
+        >
+          <span>🗑️</span>
+          <span>删除</span>
+        </button>
+      </div>
     </div>
   </div>
 </template>
@@ -106,6 +117,7 @@ const props = defineProps<{
 
 defineEmits<{
   click: [video: Video]
+  delete: [video: Video]
 }>()
 
 const store = useVideoStore()

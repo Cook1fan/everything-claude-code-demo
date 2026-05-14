@@ -1,5 +1,5 @@
 // 扫描器配置文件
-// 请根据你的实际情况修改这里的配置
+// 请复制此文件为 config.js 并根据你的实际情况修改
 
 module.exports = {
   // 要扫描的硬盘路径列表
@@ -7,10 +7,8 @@ module.exports = {
   // macOS/Linux 示例: ['/Volumes/Video1', '/Volumes/Video2']
   hardDrives: [
     // 在这里添加你的移动硬盘路径，例如：
-    'E:',
-    'F:',
-    'G:',
-    'W:',
+    // 'E:',
+    // 'F:',
   ],
 
   // 视频文件扩展名（不区分大小写）
@@ -46,7 +44,7 @@ module.exports = {
       thumbnailWidth: 320,
       // 输出图片质量 (0-31, 31 是最低质量)
       quality: 3,
-    }
+    },
   },
 
 };
