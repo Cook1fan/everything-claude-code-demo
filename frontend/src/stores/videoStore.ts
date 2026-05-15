@@ -136,11 +136,18 @@ export const useVideoStore = defineStore('video', () => {
               }
             }
 
-            // 只在有变化时触发响应式更新
-            if (hasChanges) {
-              // 触发响应式更新
-              spriteStatusMap.value = new Map(spriteStatusMap.value)
+            // 直接用后端发来的状态替换整个Map！这才是正确的！
+            const newMap = new Map<string, any>()
+            if (message.data.allStatus && Array.isArray(message.data.allStatus)) {
+              for (const status of message.data.allStatus) {
+                if (status.videoPath) {
+                  newMap.set(status.videoPath, status)
+                }
+              }
             }
+            spriteStatusMap.value = newMap
+
+            console.log(`WebSocket 更新 spriteStatusMap，共 ${newMap.size} 个任务`)
           } else if (message.type === 'batchSpriteStatus') {
             batchSpriteStats.value = message.data
             batchSpriteInProgress.value = message.data.isRunning

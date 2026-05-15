@@ -5,9 +5,6 @@ const SpriteTaskSemaphore = require('./SpriteTaskSemaphore');
 let wss = null;
 const clients = new Set();
 
-let broadcastTimeout = null;
-let pendingBroadcast = false;
-
 // 雪碧图生成 Semaphore - 5个并发，其余排队
 const spriteSemaphore = new SpriteTaskSemaphore(5);
 
@@ -36,23 +33,7 @@ function initWebSocket(server) {
 }
 
 function broadcastSpriteStatus() {
-  if (broadcastTimeout) {
-    pendingBroadcast = true;
-    return;
-  }
-
-  doBroadcast();
-
-  broadcastTimeout = setTimeout(() => {
-    broadcastTimeout = null;
-    if (pendingBroadcast) {
-      pendingBroadcast = false;
-      doBroadcast();
-    }
-  }, 100);
-}
-
-function doBroadcast() {
+  // 直接广播，不移除节流
   const allStatus = spriteSemaphore.getAllStatuses().map(status => ({
     ...status,
     videoTitle: status.videoTitle || (status.videoPath ? getVideoTitleByPath(status.videoPath) : undefined)
@@ -97,6 +78,8 @@ function broadcastScanStatus(status) {
 }
 
 function sendSpriteStatusToClient(ws) {
+  // 新连接时清理一次
+  spriteSemaphore.cleanupOldStatuses(10);
   const allStatus = spriteSemaphore.getAllStatuses().map(status => ({
     ...status,
     videoTitle: status.videoTitle || (status.videoPath ? getVideoTitleByPath(status.videoPath) : undefined)

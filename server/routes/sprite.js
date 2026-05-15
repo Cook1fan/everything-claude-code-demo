@@ -99,6 +99,8 @@ router.post('/generate', async (req, res) => {
 // API: 获取雪碧图生成状态
 router.get('/status', (req, res) => {
   const semaphore = getSpriteSemaphore();
+  // 返回状态前先清理旧任务
+  semaphore.cleanupOldStatuses(10);
   const allStatus = semaphore.getAllStatuses().map(status => ({
     ...status,
     videoTitle: status.videoTitle || (status.videoPath ? getVideoTitleByPath(status.videoPath) : undefined)
