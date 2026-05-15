@@ -46,27 +46,56 @@
       <!-- 雪碧图已生成标记 -->
       <div v-if="video.spritePath && !isGeneratingSprite" class="absolute top-2 right-2">
         <span class="bg-teal-600/90 text-white text-xs px-2 py-1 rounded font-medium shadow-lg backdrop-blur-sm">
-          🗂️ 缩略图
+          🗂️ 雪碧图
         </span>
       </div>
 
       <!-- 雪碧图生成中进度覆盖层 -->
-      <div v-if="isGeneratingSprite" class="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-2">
-        <div class="w-10 h-10 border-4 border-teal-500 border-t-transparent rounded-full animate-spin"></div>
-        <div class="text-white text-xs font-medium">
-          {{ spriteStatus?.status === 'pending' ? `排队中 #${spriteStatus.queuePosition || '?'}` : '生成中...' }}
+      <div v-if="isGeneratingSprite" class="absolute inset-0 bg-gradient-to-br from-black/80 via-slate-900/70 to-black/80 backdrop-blur-sm flex flex-col items-center justify-center gap-3">
+        <!-- 顶部图标 -->
+        <div class="relative">
+          <div v-if="spriteStatus?.status === 'pending'" class="w-14 h-14 rounded-full bg-amber-500/20 border-2 border-amber-400/50 flex items-center justify-center">
+            <span class="text-2xl">⏳</span>
+          </div>
+          <div v-else class="w-14 h-14 rounded-full bg-teal-500/20 border-2 border-teal-400/50 flex items-center justify-center">
+            <div class="absolute inset-0 rounded-full border-2 border-teal-400/30 animate-ping"></div>
+            <div class="w-8 h-8 border-3 border-teal-500 border-t-transparent rounded-full animate-spin"></div>
+          </div>
         </div>
-        <div v-if="spriteStatus?.percent != null" class="w-24 h-1.5 bg-slate-700 rounded-full overflow-hidden">
-          <div class="h-full bg-teal-500 transition-all duration-200" :style="{ width: `${spriteStatus.percent}%` }"></div>
+
+        <!-- 状态文字 -->
+        <div class="text-center">
+          <div class="text-white text-sm font-semibold mb-0.5">
+            {{ spriteStatus?.status === 'pending' ? `排队中 #${spriteStatus.queuePosition || '?'}` : '正在生成雪碧图' }}
+          </div>
+          <div class="text-slate-400 text-xs">
+            {{ spriteStatus?.status === 'pending' ? '请稍候...' : (spriteStatus?.stage || '处理中...') }}
+          </div>
         </div>
-        <div v-if="spriteStatus?.percent != null" class="text-teal-400 text-xs">
-          {{ spriteStatus.percent }}%
+
+        <!-- 进度条区域 -->
+        <div v-if="spriteStatus?.percent != null" class="w-40 space-y-1.5">
+          <div class="relative h-2 bg-slate-800 rounded-full overflow-hidden">
+            <div class="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent animate-shimmer"></div>
+            <div
+              class="h-full bg-gradient-to-r from-teal-500 via-emerald-400 to-teal-500 transition-all duration-300 rounded-full"
+              :style="{ width: `${Math.min(spriteStatus.percent, 100)}%` }"
+            ></div>
+          </div>
+          <div class="flex items-center justify-between text-xs">
+            <span class="text-teal-400 font-medium">{{ spriteStatus.percent }}%</span>
+            <span v-if="spriteStatus.frameCount != null && spriteStatus.totalFrames != null" class="text-slate-500">
+              {{ spriteStatus.frameCount }}/{{ spriteStatus.totalFrames }} 帧
+            </span>
+          </div>
         </div>
+
+        <!-- 取消按钮 -->
         <button
           @click.stop="abortSpriteGeneration"
-          class="mt-1 px-2 py-0.5 bg-red-600/80 hover:bg-red-600 text-white text-xs rounded transition-colors"
+          class="mt-1 px-3 py-1.5 bg-gradient-to-r from-red-600/80 to-rose-600/80 hover:from-red-600 hover:to-rose-600 text-white text-xs rounded-full transition-all duration-200 shadow-lg shadow-red-900/20 hover:shadow-red-900/40 hover:scale-105 active:scale-95"
         >
-          取消
+          取消生成
         </button>
       </div>
 
@@ -280,5 +309,18 @@ async function abortSpriteGeneration() {
 <style scoped>
 img {
   transition: opacity 0.2s ease-in-out;
+}
+
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.animate-shimmer {
+  animation: shimmer 2s infinite;
 }
 </style>
