@@ -402,7 +402,15 @@ class SpriteTaskSemaphore extends EventEmitter {
   _loadFromStorage() {
     try {
       if (fs.existsSync(this.storagePath)) {
-        const data = JSON.parse(fs.readFileSync(this.storagePath, 'utf-8'));
+        let data;
+        try {
+          data = JSON.parse(fs.readFileSync(this.storagePath, 'utf-8'));
+        } catch (parseErr) {
+          console.warn('[Semaphore] 存储文件损坏，将删除并重新开始:', parseErr.message);
+          fs.unlinkSync(this.storagePath);
+          return;
+        }
+
         if (data.tasks && Array.isArray(data.tasks)) {
           let abortedCount = 0;
           for (const task of data.tasks) {
