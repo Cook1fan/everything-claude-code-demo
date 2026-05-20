@@ -1,34 +1,17 @@
-const express = require('express');
-const cors = require('cors');
 const http = require('http');
 const path = require('path');
 
 const config = require('../scanner/config');
 const { ensureDataFile } = require('./utils');
 const { initWebSocket, broadcastScanStatus } = require('./websocket');
-const { clearVideoDataCache, clearVideoInfoCache } = require('./middleware/cache');
+const { createApp } = require('./app');
 
-const videosRouter = require('./routes/videos');
-const scanRouter = require('./routes/scan');
-const filesRouter = require('./routes/files');
-const spriteRouter = require('./routes/sprite');
-
-const app = express();
 const PORT = 3000;
+const app = createApp();
 const server = http.createServer(app);
 
 // 初始化 WebSocket
 initWebSocket(server);
-
-// 中间件
-app.use(cors());
-app.use(express.json());
-
-// API 路由
-app.use('/api/videos', videosRouter);
-app.use('/api/scan', scanRouter);
-app.use('/api', filesRouter);
-app.use('/api/sprite', spriteRouter);
 
 // 启动服务器
 ensureDataFile();
@@ -51,3 +34,5 @@ server.listen(PORT, () => {
   console.log(`  POST /api/sprite/batch-abort - 中止批量生成`);
   console.log(`WebSocket: ws://localhost:${PORT} - 实时状态推送`);
 });
+
+module.exports = { server };

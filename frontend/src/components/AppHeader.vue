@@ -66,7 +66,7 @@
             <!-- 展开的进度面板 -->
             <div
               v-show="showSpritePanel"
-              class="absolute top-full left-0 mt-2 z-50 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl p-4 min-w-[350px] max-h-[500px] overflow-y-auto"
+              class="absolute top-full left-0 mt-2 z-50 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl p-4 min-w-[600px] max-w-[800px] max-h-[700px] overflow-y-auto"
               @mousedown.stop
             >
               <div class="flex items-center justify-between gap-2 mb-3">
@@ -93,28 +93,31 @@
               <!-- 每个视频的进度 -->
               <div v-for="status in allSpriteStatus" :key="status.videoPath || status.videoId || status.id" class="mb-3 pb-3 border-b border-slate-700 last:border-0 last:mb-0 last:pb-0">
                 <div class="flex items-start gap-2">
-                  <!-- 状态图标 -->
-                  <span v-if="status.status === 'completed'" class="text-green-400 text-sm shrink-0">✓</span>
-                  <span v-else-if="status.status === 'error'" class="text-red-400 text-sm shrink-0">✗</span>
-                  <span v-else-if="status.status === 'aborted'" class="text-slate-400 text-sm shrink-0">⏹</span>
-                  <span v-else-if="status.status === 'pending'" class="text-orange-400 text-sm shrink-0">⏳</span>
-                  <span v-else class="text-teal-400 text-sm shrink-0 animate-pulse">⚡</span>
+                  <!-- 序号（仅对已结束的任务显示） + 状态图标 -->
+                  <div class="shrink-0 flex items-center gap-1 pt-0.5">
+                    <span v-if="status.displayIndex" class="text-[10px] text-slate-500 font-mono">#{{ status.displayIndex }}</span>
+                    <span v-if="status.status === 'completed'" class="text-green-400 text-sm">✓</span>
+                    <span v-else-if="status.status === 'error'" class="text-red-400 text-sm">✗</span>
+                    <span v-else-if="status.status === 'aborted'" class="text-slate-400 text-sm">⏹</span>
+                    <span v-else-if="status.status === 'pending'" class="text-orange-400 text-sm">⏳</span>
+                    <span v-else class="text-teal-400 text-sm animate-pulse">⚡</span>
+                  </div>
 
                   <div class="flex-1 min-w-0">
                     <p
                       v-if="status.videoId"
-                      class="text-sm text-teal-400 hover:text-teal-300 truncate mb-1 cursor-pointer hover:underline"
+                      class="text-sm text-teal-400 hover:text-teal-300 mb-1 cursor-pointer hover:underline truncate"
                       :title="status.videoTitle || status.videoPath"
                       @mousedown.stop="navigateToVideo(status)"
                     >
-                      {{ status.videoTitle || getVideoName(status.videoPath) }}
+                      {{ truncateString(status.videoTitle || getVideoName(status.videoPath), 100) }}
                     </p>
                     <p
                       v-else
-                      class="text-sm text-slate-400 truncate mb-1"
+                      class="text-sm text-slate-400 mb-1 truncate"
                       :title="status.videoTitle || status.videoPath"
                     >
-                      {{ status.videoTitle || getVideoName(status.videoPath) }}
+                      {{ truncateString(status.videoTitle || getVideoName(status.videoPath), 100) }}
                     </p>
 
                     <!-- 排队位置显示 -->
@@ -236,7 +239,7 @@ const pendingCount = computed(() => {
 const allSpriteStatus = computed(() => {
   const statusArray = Array.from(store.spriteStatusMap.values())
   // 排序：排队中 > 运行中 > 其他（按时间倒序）
-  return statusArray.sort((a, b) => {
+  const sorted = statusArray.sort((a, b) => {
     const statusOrder = { pending: 0, running: 1, completed: 2, error: 3, aborted: 4 }
     const orderA = statusOrder[a.status as keyof typeof statusOrder] ?? 5
     const orderB = statusOrder[b.status as keyof typeof statusOrder] ?? 5
@@ -245,6 +248,15 @@ const allSpriteStatus = computed(() => {
     const timeA = a.createdAt || 0
     const timeB = b.createdAt || 0
     return timeB - timeA
+  })
+
+  // 给已完成的任务添加序号（最新的是#1）
+  let completedIndex = 1
+  return sorted.map(status => {
+    if (status.status === 'completed' || status.status === 'error' || status.status === 'aborted') {
+      return { ...status, displayIndex: completedIndex++ }
+    }
+    return status
   })
 })
 
@@ -291,6 +303,12 @@ function getVideoName(videoPath?: string) {
   if (!videoPath) return ''
   const parts = videoPath.replace(/\\/g, '/').split('/')
   return parts[parts.length - 1] || videoPath
+}
+
+function truncateString(str: string, maxLength: number = 100): string {
+  if (!str) return ''
+  if (str.length <= maxLength) return str
+  return str.slice(0, maxLength) + '...'
 }
 
 function navigateToVideo(status: { videoId?: string; videoPath?: string }) {
@@ -340,49 +358,20 @@ async function handleAbort(videoPath?: string) {
 // 当开始生成时自动显示面板，处理倒计时
 watch(() => allSpriteStatus.value, (newStatuses) => {
   for (const status of newStatuses) {
-    if (!status.videoPath) continue
+    if (!status.id) continue
 
     const isInProgress = status.status === 'pending' || status.status === 'running'
-    const wasInProgress = wasInProgressMap.get(status.videoPath) || false
+    const wasInProgress = wasInProgressMap.get(status.id) || false
 
-    // 清除倒计时
-    if (isInProgress) {
-      if (countdownTimers.has(status.videoPath)) {
-        clearInterval(countdownTimers.get(status.videoPath)!)
-        countdownTimers.delete(status.videoPath)
-      }
-      countdownSecondsMap.set(status.videoPath, 0)
-      countdownUpdateTriggers.value.delete(status.videoPath)
+    // 检测从进行中变为完成 - 立即刷新浏览器
+    if (wasInProgress && !isInProgress && status.status === 'completed') {
+      // 延迟一小会儿确保状态更新完毕
+      setTimeout(() => {
+        location.reload()
+      }, 500)
     }
 
-    // 检测从进行中变为完成 - 暂时移除自动刷新，避免历史任务导致无限刷新
-    // if (wasInProgress && !isInProgress && status.status === 'completed') {
-    //   // 只有在确实没有倒计时的情况下才开始，避免历史任务重复触发
-    //   if (!countdownTimers.has(status.videoPath) && !countdownSecondsMap.has(status.videoPath)) {
-    //     // 开始倒计时刷新
-    //     countdownSecondsMap.set(status.videoPath, COUNTDOWN_SECONDS)
-    //     countdownUpdateTriggers.value.set(status.videoPath, Date.now())
-    //
-    //     const vp = status.videoPath
-    //     const timer = window.setInterval(() => {
-    //       const current = countdownSecondsMap.get(vp) || 0
-    //       if (current <= 1) {
-    //         clearInterval(timer)
-    //         countdownTimers.delete(vp)
-    //         countdownSecondsMap.delete(vp)
-    //         countdownUpdateTriggers.value.delete(vp)
-    //         location.reload()
-    //       } else {
-    //         countdownSecondsMap.set(vp, current - 1)
-    //         countdownUpdateTriggers.value.set(vp, Date.now())
-    //       }
-    //     }, 1000)
-    //
-    //     countdownTimers.set(vp, timer)
-    //   }
-    // }
-
-    wasInProgressMap.set(status.videoPath, isInProgress)
+    wasInProgressMap.set(status.id, isInProgress)
   }
 }, { deep: true })
 </script>

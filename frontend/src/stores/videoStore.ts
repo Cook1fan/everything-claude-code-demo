@@ -34,9 +34,13 @@ export const useVideoStore = defineStore('video', () => {
   // 辅助函数：判断某个视频是否正在生成或排队中
   function isSpriteInProgress(videoPath?: string): boolean {
     if (!videoPath) return false
-    const status = spriteStatusMap.value.get(videoPath)
-    if (!status) return false
-    return status.status === 'pending' || status.status === 'running'
+    // 遍历查找匹配的视频路径
+    for (const status of spriteStatusMap.value.values()) {
+      if (status.videoPath === videoPath) {
+        return status.status === 'pending' || status.status === 'running'
+      }
+    }
+    return false
   }
 
   // 防抖定时器用于刷新视频列表
@@ -82,72 +86,105 @@ export const useVideoStore = defineStore('video', () => {
         try {
           const message = JSON.parse(event.data)
           if (message.type === 'spriteStatus') {
-            // 直接更新现有Map，只修改变化的
-            let hasChanges = false
+            // 保存旧Map用于检测状态变化
+            const oldMap = spriteStatusMap.value
 
-            if (message.data.allStatus && Array.isArray(message.data.allStatus)) {
-              // 添加所有状态
-              for (const status of message.data.allStatus) {
-                if (status.videoPath) {
-                  const existingStatus = spriteStatusMap.value.get(status.videoPath)
+            // 处理后端发来的状态
+            let allStatus = Array.isArray(message.data.allStatus) ? message.data.allStatus : []
 
-                  // 只有状态变化时才更新
-                  if (!existingStatus || existingStatus.status !== status.status || existingStatus.percent !== status.percent) {
-                    // 检查这个状态是否是刚完成的
-                    const justCompleted = status.status === 'completed' &&
-                      (!existingStatus || existingStatus.status !== 'completed')
+            // 按时间倒序排序所有任务（最新的在前面）
+            allStatus.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
 
-                    if (justCompleted) {
-                      console.log('检测到雪碧图完成:', status.videoPath, status.videoId)
-
-                      // 保存到播放历史 store（持久化到 IndexedDB）
-                      if (status.videoId) {
-                        // 计算生成耗时
-                        let generateTime: number | undefined
-                        if (status.createdAt && status.updatedAt) {
-                          generateTime = status.updatedAt - status.createdAt
-                        } else if (status.totalTime) {
-                          generateTime = status.totalTime
-                        }
-
-                        try {
-                          const playHistory = usePlayHistoryStore()
-                          playHistory.setSpriteGenerated(status.videoId, generateTime)
-                        } catch (err) {
-                          console.error('保存雪碧图生成时间失败:', err)
-                        }
-                      }
-
-                      // 防抖刷新视频列表
-                      if (refreshVideosTimer) {
-                        clearTimeout(refreshVideosTimer)
-                      }
-                      refreshVideosTimer = window.setTimeout(() => {
-                        console.log('刷新视频列表...')
-                        loadVideos()
-                        refreshVideosTimer = null
-                      }, 500)
-                    }
-
-                    spriteStatusMap.value.set(status.videoPath, status)
-                    hasChanges = true
-                  }
+            // 检测哪些任务刚完成
+            const justCompletedIds: string[] = []
+            for (const status of allStatus) {
+              if (status.id && status.status === 'completed') {
+                const oldStatus = oldMap.get(status.id)
+                if (!oldStatus || oldStatus.status !== 'completed') {
+                  justCompletedIds.push(status.id)
                 }
               }
             }
 
-            // 直接用后端发来的状态替换整个Map！这才是正确的！
-            const newMap = new Map<string, any>()
-            if (message.data.allStatus && Array.isArray(message.data.allStatus)) {
-              for (const status of message.data.allStatus) {
-                if (status.videoPath) {
-                  newMap.set(status.videoPath, status)
-                }
+            // 先构建包含所有任务的 Map
+            let newMap = new Map<string, any>()
+            for (const status of allStatus) {
+              if (status.id) {
+                newMap.set(status.id, status)
               }
             }
+
+            // 如果有任务刚完成，才需要限制数量为 10 个
+            if (justCompletedIds.length > 0) {
+              // 确保进行中的任务优先保留，然后保留最新的已完成任务
+              const inProgressTasks: any[] = []
+              const otherTasks: any[] = []
+
+              for (const status of allStatus) {
+                if (status.status === 'pending' || status.status === 'running') {
+                  inProgressTasks.push(status)
+                } else {
+                  otherTasks.push(status)
+                }
+              }
+
+              // 计算还能保留多少个已完成的任务（总共10个）
+              const remainingSlots = Math.max(0, 10 - inProgressTasks.length)
+              const keptCompletedTasks = otherTasks.slice(0, remainingSlots)
+
+              // 合并任务
+              const filteredStatus = [...inProgressTasks, ...keptCompletedTasks]
+
+              // 重新构建限制后的 Map
+              newMap = new Map<string, any>()
+              for (const status of filteredStatus) {
+                if (status.id) {
+                  newMap.set(status.id, status)
+                }
+              }
+
+              console.log(`检测到任务完成，限制任务数为 ${newMap.size} 个 (原始 ${allStatus.length} 个，已完成保留 ${keptCompletedTasks.length} 个)`)
+            } else {
+              console.log(`WebSocket 更新 spriteStatusMap，共 ${newMap.size} 个任务 (无任务完成，暂不限制)`)
+            }
+
             spriteStatusMap.value = newMap
 
-            console.log(`WebSocket 更新 spriteStatusMap，共 ${newMap.size} 个任务`)
+            // 处理刚完成的任务
+            for (const id of justCompletedIds) {
+              const status = newMap.get(id)
+              if (!status) continue
+
+              console.log('检测到雪碧图完成:', status.videoPath, status.videoId)
+
+              // 保存到播放历史 store（持久化到 IndexedDB）
+              if (status.videoId) {
+                // 计算生成耗时
+                let generateTime: number | undefined
+                if (status.createdAt && status.updatedAt) {
+                  generateTime = status.updatedAt - status.createdAt
+                } else if (status.totalTime) {
+                  generateTime = status.totalTime
+                }
+
+                try {
+                  const playHistory = usePlayHistoryStore()
+                  playHistory.setSpriteGenerated(status.videoId, generateTime)
+                } catch (err) {
+                  console.error('保存雪碧图生成时间失败:', err)
+                }
+              }
+
+              // 防抖刷新视频列表
+              if (refreshVideosTimer) {
+                clearTimeout(refreshVideosTimer)
+              }
+              refreshVideosTimer = window.setTimeout(() => {
+                console.log('刷新视频列表...')
+                loadVideos()
+                refreshVideosTimer = null
+              }, 500)
+            }
           } else if (message.type === 'batchSpriteStatus') {
             batchSpriteStats.value = message.data
             batchSpriteInProgress.value = message.data.isRunning
@@ -230,15 +267,102 @@ export const useVideoStore = defineStore('video', () => {
     try {
       const data = await getSpriteStatus()
       if (data.allStatus && Array.isArray(data.allStatus)) {
-        // 完全替换为服务器状态
-        spriteStatusMap.value.clear()
-        for (const status of data.allStatus) {
-          if (status.videoPath) {
-            spriteStatusMap.value.set(status.videoPath, status)
+        const oldMap = spriteStatusMap.value
+        const allStatus = data.allStatus
+
+        // 按时间倒序排序所有任务（最新的在前面）
+        allStatus.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+
+        // 检测哪些任务刚完成（与旧状态比较）
+        const justCompletedIds: string[] = []
+        for (const status of allStatus) {
+          if (status.id && status.status === 'completed') {
+            const oldStatus = oldMap.get(status.id)
+            if (!oldStatus || oldStatus.status !== 'completed') {
+              justCompletedIds.push(status.id)
+            }
           }
         }
-        // 触发响应式更新
-        spriteStatusMap.value = new Map(spriteStatusMap.value)
+
+        // 先构建包含所有任务的 Map
+        let newMap = new Map<string, any>()
+        for (const status of allStatus) {
+          if (status.id) {
+            newMap.set(status.id, status)
+          }
+        }
+
+        // 如果有任务刚完成，或者是第一次加载（旧Map为空），才限制数量为 10 个
+        if (justCompletedIds.length > 0 || oldMap.size === 0) {
+          // 确保进行中的任务优先保留，然后保留最新的已完成任务
+          const inProgressTasks: any[] = []
+          const otherTasks: any[] = []
+
+          for (const status of allStatus) {
+            if (status.status === 'pending' || status.status === 'running') {
+              inProgressTasks.push(status)
+            } else {
+              otherTasks.push(status)
+            }
+          }
+
+          // 计算还能保留多少个已完成的任务（总共10个）
+          const remainingSlots = Math.max(0, 10 - inProgressTasks.length)
+          const keptCompletedTasks = otherTasks.slice(0, remainingSlots)
+
+          // 合并任务
+          const filteredStatus = [...inProgressTasks, ...keptCompletedTasks]
+
+          // 重新构建限制后的 Map
+          newMap = new Map<string, any>()
+          for (const status of filteredStatus) {
+            if (status.id) {
+              newMap.set(status.id, status)
+            }
+          }
+
+          console.log(`从服务器刷新 spriteStatusMap，共 ${newMap.size} 个任务 (原始 ${allStatus.length} 个，已完成保留 ${keptCompletedTasks.length} 个，有 ${justCompletedIds.length} 个任务刚完成)`)
+        } else {
+          console.log(`从服务器刷新 spriteStatusMap，共 ${newMap.size} 个任务 (无任务完成，暂不限制)`)
+        }
+
+        spriteStatusMap.value = newMap
+
+        // 处理刚完成的任务 - 保存到播放历史等
+        for (const id of justCompletedIds) {
+          const status = newMap.get(id)
+          if (!status) continue
+
+          console.log('检测到雪碧图完成 (从服务器刷新):', status.videoPath, status.videoId)
+
+          // 保存到播放历史 store（持久化到 IndexedDB）
+          if (status.videoId) {
+            // 计算生成耗时
+            let generateTime: number | undefined
+            if (status.createdAt && status.updatedAt) {
+              generateTime = status.updatedAt - status.createdAt
+            } else if (status.totalTime) {
+              generateTime = status.totalTime
+            }
+
+            try {
+              const playHistory = usePlayHistoryStore()
+              playHistory.setSpriteGenerated(status.videoId, generateTime)
+            } catch (err) {
+              console.error('保存雪碧图生成时间失败:', err)
+            }
+          }
+
+          // 防抖刷新视频列表
+          if (refreshVideosTimer) {
+            clearTimeout(refreshVideosTimer)
+          }
+          refreshVideosTimer = window.setTimeout(() => {
+            console.log('刷新视频列表...')
+            loadVideos()
+            refreshVideosTimer = null
+          }, 500)
+        }
       }
     } catch (err) {
       console.error('从服务器刷新雪碧图状态失败:', err)

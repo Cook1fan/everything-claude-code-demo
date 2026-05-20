@@ -111,7 +111,7 @@
           </div>
 
           <!-- 播放控制按钮 -->
-          <div v-if="player" class="bg-slate-800 px-4 py-3 border-b border-slate-700">
+          <div v-if="video" class="bg-slate-800 px-4 py-3 border-b border-slate-700">
             <div class="flex items-center justify-center gap-2 flex-wrap">
               <button
                 @click="resetToStart"
@@ -314,9 +314,17 @@ const PLAYBACK_RATES = [1, 1.5, 2, 3, 4] as const
 // 检查当前视频是否正在生成雪碧图
 const isCurrentVideoGenerating = computed(() => {
   if (!video.value) return false
-  const status = store.spriteStatusMap.get(video.value.videoPath)
-  if (!status) return false
-  return (status.status === 'pending' || status.status === 'running') && !status.error
+  // 查找该视频的所有任务，取最新的一个
+  let latestStatus = null
+  for (const status of store.spriteStatusMap.values()) {
+    if (status.videoPath === video.value.videoPath) {
+      if (!latestStatus || (status.createdAt || 0) > (latestStatus.createdAt || 0)) {
+        latestStatus = status
+      }
+    }
+  }
+  if (!latestStatus) return false
+  return (latestStatus.status === 'pending' || latestStatus.status === 'running') && !latestStatus.error
 })
 
 function normalizePath(p: string): string {
@@ -361,24 +369,37 @@ function handleKeyDown(event: KeyboardEvent) {
 function rewind10() {
   if (player) {
     player.rewind(10)
+  } else if (videoRef.value) {
+    videoRef.value.currentTime = Math.max(0, videoRef.value.currentTime - 10)
   }
 }
 
 function forward15() {
   if (player) {
     player.forward(15)
+  } else if (videoRef.value) {
+    videoRef.value.currentTime = Math.min(videoRef.value.duration || 0, videoRef.value.currentTime + 15)
   }
 }
 
 function forward30() {
   if (player) {
     player.forward(30)
+  } else if (videoRef.value) {
+    videoRef.value.currentTime = Math.min(videoRef.value.duration || 0, videoRef.value.currentTime + 30)
   }
 }
 
 function togglePlay() {
-  if (player) {
+  if (player && video.value) {
     player.togglePlay()
+  } else if (videoRef.value) {
+    // 如果 Plyr 还没初始化，直接操作 video 元素
+    if (videoRef.value.paused) {
+      videoRef.value.play()
+    } else {
+      videoRef.value.pause()
+    }
   }
 }
 
@@ -392,10 +413,13 @@ function setPlaybackRate(rate: PlaybackRate) {
 }
 
 function resetToStart() {
-  if (!player || !video.value) return
-  // 先重置到开始
-  player.stop()
-  // 删除当前播放位置记录
+  if (!video.value) return
+  if (player) {
+    player.stop()
+  } else if (videoRef.value) {
+    videoRef.value.currentTime = 0
+    videoRef.value.pause()
+  }
   playHistory.clearLastPlaybackPosition(video.value.id)
 }
 
@@ -842,19 +866,38 @@ async function generateSpriteSheet() {
 function watchSpriteStatus() {
   if (!video.value) return
 
-  const status = store.spriteStatusMap.get(video.value.videoPath)
-  if (!status) return
+  // 查找该视频的所有任务，取最新的一个
+  let latestStatus = null
+  for (const s of store.spriteStatusMap.values()) {
+    if (s.videoPath === video.value.videoPath) {
+      if (!latestStatus || (s.createdAt || 0) > (latestStatus.createdAt || 0)) {
+        latestStatus = s
+      }
+    }
+  }
 
-  if (status.status === 'completed' && !status.error) {
+  if (!latestStatus) {
+    // 没有任务，确保按钮可点击
+    spriteGenerating.value = false
+    return
+  }
+
+  if (latestStatus.status === 'completed' && !latestStatus.error) {
     // 完成：清除生成状态
     spriteGenerating.value = false
-  } else if (status.status === 'error' || status.error) {
+  } else if (latestStatus.status === 'error' || latestStatus.error) {
     // 出错
     spriteGenerating.value = false
-    alert('雪碧图生成失败: ' + (status.errorMessage || '未知错误'))
-  } else if ((status.status === 'pending' || status.status === 'running') && !status.error) {
+    alert('雪碧图生成失败: ' + (latestStatus.errorMessage || '未知错误'))
+  } else if (latestStatus.status === 'aborted') {
+    // 任务被中止
+    spriteGenerating.value = false
+  } else if ((latestStatus.status === 'pending' || latestStatus.status === 'running') && !latestStatus.error) {
     // 还在生成中
     spriteGenerating.value = true
+  } else {
+    // 其他状态，确保按钮可点击
+    spriteGenerating.value = false
   }
 }
 
@@ -864,25 +907,30 @@ onMounted(async () => {
 
   playHistory.resetPlayCountMarker()
   window.addEventListener('keydown', handleKeyDown)
-
-  setTimeout(() => {
-    loadPlayer()
-  }, 100)
 })
 
-// 当视频信息加载完成后，加载雪碧图
+// 当视频信息加载完成后，加载雪碧图和播放器
 watch(video, async (newVideo, oldVideo) => {
   if (newVideo) {
     // 如果雪碧图路径从无到有，或者发生了变化，重新加载雪碧图
     const spritePathChanged = newVideo.spritePath !== oldVideo?.spritePath
     if (spritePathChanged || !oldVideo) {
       await loadSprite()
-      // 如果有播放器且有新的雪碧图，也重新加载播放器以启用缩略图预览
-      if (player && newVideo.spritePath) {
-        setTimeout(() => {
+    }
+
+    // 初始化播放器（如果还没初始化）
+    if (!player || oldVideo?.id !== newVideo.id) {
+      // 尝试立即初始化，如果失败则重试几次
+      let attempts = 0
+      const tryLoadPlayer = () => {
+        if (videoRef.value && video.value) {
           loadPlayer()
-        }, 100)
+        } else if (attempts < 10) {
+          attempts++
+          setTimeout(tryLoadPlayer, 50)
+        }
       }
+      tryLoadPlayer()
     }
   }
 }, { immediate: true })
@@ -890,7 +938,7 @@ watch(video, async (newVideo, oldVideo) => {
 // 监听雪碧图状态变化
 watch([
   () => store.spriteInProgress,
-  () => (video.value ? store.spriteStatusMap.get(video.value.videoPath) : null)
+  () => store.spriteStatusMap
 ], () => {
   watchSpriteStatus()
 }, { deep: true })

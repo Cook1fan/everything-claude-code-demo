@@ -218,9 +218,9 @@ function normalizePath(p: string): string {
 const spriteStatus = computed((): SpriteStatus | undefined => {
   // 尝试查找匹配的状态（通过 normalizePath 确保一致）
   const normalizedCurrentPath = normalizePath(props.video.videoPath)
-  for (const [key, value] of store.spriteStatusMap.entries()) {
-    if (normalizePath(key) === normalizedCurrentPath) {
-      return value
+  for (const status of store.spriteStatusMap.values()) {
+    if (status.videoPath && normalizePath(status.videoPath) === normalizedCurrentPath) {
+      return status
     }
   }
   return undefined
