@@ -695,6 +695,15 @@ export const useVideoStore = defineStore('video', () => {
     await refreshSpriteStatusFromServer()
   }
 
+  // 清理 store 资源（在应用退出时调用）
+  function cleanup() {
+    disconnectWebSocket()
+    if (refreshVideosTimer) {
+      clearTimeout(refreshVideosTimer)
+      refreshVideosTimer = null
+    }
+  }
+
   function addToRecent(videoId: string) {
     const recent = recentVideos.value.filter(id => id !== videoId)
     recent.unshift(videoId)
@@ -774,5 +783,6 @@ export const useVideoStore = defineStore('video', () => {
     refreshSpriteStatusFromServer,
     shuffleArray,
     isSpriteInProgress,
+    cleanup,
   }
 })

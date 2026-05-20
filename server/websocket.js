@@ -4,6 +4,12 @@ const SpriteTaskSemaphore = require('./SpriteTaskSemaphore');
 
 let wss = null;
 const clients = new Set();
+const clientTimestamps = new Map(); // ws -> lastSeen
+let deadConnectionCheckInterval = null;
+
+// 心跳配置
+const HEARTBEAT_INTERVAL = 30 * 1000; // 30秒
+const HEARTBEAT_TIMEOUT = 10 * 1000; // 10秒
 
 // 雪碧图生成 Semaphore - 5个并发，其余排队
 const spriteSemaphore = new SpriteTaskSemaphore(5);
@@ -21,15 +27,82 @@ function initWebSocket(server) {
 
   wss.on('connection', (ws) => {
     clients.add(ws);
+    clientTimestamps.set(ws, Date.now());
     console.log('WebSocket 客户端已连接');
+
+    // 心跳检测 - 定期发送 ping
+    const heartbeat = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        const sentAt = Date.now();
+        ws.ping();
+
+        // 设置超时，如果在超时时间内没收到 pong 就关闭连接
+        const timeout = setTimeout(() => {
+          const lastSeen = clientTimestamps.get(ws) || 0;
+          if (lastSeen < sentAt) {
+            console.log('[WebSocket] 客户端心跳超时，关闭连接');
+            ws.close();
+          }
+        }, HEARTBEAT_TIMEOUT);
+
+        // 保存 timeout 引用，便于清理
+        ws._heartbeatTimeout = timeout;
+      }
+    }, HEARTBEAT_INTERVAL);
+
+    ws._heartbeat = heartbeat;
+
+    // 收到 pong 更新时间戳
+    ws.on('pong', () => {
+      clientTimestamps.set(ws, Date.now());
+      if (ws._heartbeatTimeout) {
+        clearTimeout(ws._heartbeatTimeout);
+        ws._heartbeatTimeout = null;
+      }
+    });
 
     sendSpriteStatusToClient(ws);
 
     ws.on('close', () => {
       clients.delete(ws);
+      clientTimestamps.delete(ws);
+      if (ws._heartbeat) {
+        clearInterval(ws._heartbeat);
+      }
+      if (ws._heartbeatTimeout) {
+        clearTimeout(ws._heartbeatTimeout);
+      }
       console.log('WebSocket 客户端已断开');
     });
+
+    ws.on('error', (err) => {
+      console.error('[WebSocket] 错误:', err);
+      clients.delete(ws);
+      clientTimestamps.delete(ws);
+      if (ws._heartbeat) {
+        clearInterval(ws._heartbeat);
+      }
+      if (ws._heartbeatTimeout) {
+        clearTimeout(ws._heartbeatTimeout);
+      }
+    });
   });
+
+  // 定期清理死连接（每 HEARTBEAT_INTERVAL 检查一次）
+  if (process.env.NODE_ENV !== 'test') {
+    deadConnectionCheckInterval = setInterval(() => {
+      const now = Date.now();
+      for (const ws of clients) {
+        const lastSeen = clientTimestamps.get(ws) || 0;
+        if (now - lastSeen > 2 * HEARTBEAT_INTERVAL) {
+          console.log('[WebSocket] 清理死连接');
+          ws.close();
+          clients.delete(ws);
+          clientTimestamps.delete(ws);
+        }
+      }
+    }, HEARTBEAT_INTERVAL);
+  }
 }
 
 function broadcastSpriteStatus() {
@@ -142,6 +215,22 @@ function getSpriteGenerationStatusMap() {
   return mockMap;
 }
 
+/**
+ * 清理资源（用于测试）
+ */
+function cleanup() {
+  if (deadConnectionCheckInterval) {
+    clearInterval(deadConnectionCheckInterval);
+    deadConnectionCheckInterval = null;
+  }
+  // 关闭所有连接
+  for (const ws of clients) {
+    ws.close();
+  }
+  clients.clear();
+  clientTimestamps.clear();
+}
+
 module.exports = {
   initWebSocket,
   broadcastSpriteStatus,
@@ -152,5 +241,6 @@ module.exports = {
   getSpriteGenerationInProgressSet, // 向后兼容
   getSpriteGenerationStatusMap,     // 向后兼容
   setBatchThreadPool,
-  getBatchThreadPool
+  getBatchThreadPool,
+  cleanup
 };

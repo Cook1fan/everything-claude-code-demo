@@ -309,6 +309,9 @@ let isPlaying = false
 let savePositionTimer: number | null = null
 let currentVttBlobUrl: string | null = null
 
+// 保存 Plyr 事件监听器引用，用于清理
+const playerEventListeners = new Map<string, (...args: any[]) => void>()
+
 const PLAYBACK_RATES = [1, 1.5, 2, 3, 4] as const
 
 // 检查当前视频是否正在生成雪碧图
@@ -593,6 +596,40 @@ function cleanupVttBlobUrl() {
   }
 }
 
+// 清理雪碧图引用
+function cleanupSpriteImage() {
+  if (spriteImage.value) {
+    // 移除图像所有引用，帮助 GC
+    spriteImage.value.src = ''
+    spriteImage.value.onload = null
+    spriteImage.value.onerror = null
+    spriteImage.value = null
+  }
+}
+
+// 清理 Plyr 播放器和所有事件监听器
+function cleanupPlayer() {
+  if (player) {
+    // 移除所有保存的事件监听器
+    for (const [event, handler] of playerEventListeners) {
+      try {
+        player.off(event, handler)
+      } catch (e) {
+        // 忽略移除监听器时的错误
+      }
+    }
+    playerEventListeners.clear()
+
+    // 销毁播放器
+    try {
+      player.destroy()
+    } catch (e) {
+      // 忽略销毁时的错误
+    }
+    player = null
+  }
+}
+
 // 动态加载并修改 VTT 文件，使雪碧图路径正确
 async function getVttBlobUrl(vttPath: string, spritePath: string): Promise<string | null> {
   // 先清理旧的
@@ -707,7 +744,9 @@ async function loadPlayer() {
 
     player = new Plyr(videoRef.value, plyrConfig)
 
-    player.on('play', () => {
+    // 定义并保存每个事件监听器的引用
+
+    const playHandler = () => {
       isPlaying = true
       if (video.value) {
         playHistory.startSession(video.value.id)
@@ -717,9 +756,11 @@ async function loadPlayer() {
         clearInterval(savePositionTimer)
       }
       savePositionTimer = window.setInterval(saveCurrentPosition, 5000)
-    })
+    }
+    playerEventListeners.set('play', playHandler)
+    player.on('play', playHandler)
 
-    player.on('pause', () => {
+    const pauseHandler = () => {
       isPlaying = false
       playHistory.pauseSession()
       // 暂停时立即保存播放位置
@@ -728,9 +769,11 @@ async function loadPlayer() {
         clearInterval(savePositionTimer)
         savePositionTimer = null
       }
-    })
+    }
+    playerEventListeners.set('pause', pauseHandler)
+    player.on('pause', pauseHandler)
 
-    player.on('ended', () => {
+    const endedHandler = () => {
       isPlaying = false
       playHistory.pauseSession()
       // 播放结束时保存位置
@@ -739,15 +782,19 @@ async function loadPlayer() {
         clearInterval(savePositionTimer)
         savePositionTimer = null
       }
-    })
+    }
+    playerEventListeners.set('ended', endedHandler)
+    player.on('ended', endedHandler)
 
-    player.on('error', (event) => {
+    const errorHandler = (event: any) => {
       console.error('Plyr 播放错误:', event)
       playError.value = '视频播放失败，请检查视频格式'
-    })
+    }
+    playerEventListeners.set('error', errorHandler)
+    player.on('error', errorHandler)
 
     // 监听视频元数据加载完成，保存视频时长并恢复播放位置
-    player.on('loadedmetadata', () => {
+    const loadedmetadataHandler = () => {
       if (video.value && player) {
         const duration = player.duration
         if (duration && duration > 0) {
@@ -761,10 +808,12 @@ async function loadPlayer() {
         // 恢复播放速度
         player.speed = playbackRate.value
       }
-    })
+    }
+    playerEventListeners.set('loadedmetadata', loadedmetadataHandler)
+    player.on('loadedmetadata', loadedmetadataHandler)
 
     // 监听播放器 ready 事件，也尝试获取时长和恢复播放位置
-    player.on('ready', () => {
+    const readyHandler = () => {
       if (video.value && player) {
         const duration = player.duration
         if (duration && duration > 0) {
@@ -778,14 +827,18 @@ async function loadPlayer() {
         // 恢复播放速度
         player.speed = playbackRate.value
       }
-    })
+    }
+    playerEventListeners.set('ready', readyHandler)
+    player.on('ready', readyHandler)
 
     // 监听播放速度变化
-    player.on('ratechange', () => {
+    const ratechangeHandler = () => {
       if (player) {
         playbackRate.value = player.speed
       }
-    })
+    }
+    playerEventListeners.set('ratechange', ratechangeHandler)
+    player.on('ratechange', ratechangeHandler)
   }
 }
 
@@ -975,13 +1028,11 @@ onBeforeUnmount(() => {
   // 清理 VTT Blob URL
   cleanupVttBlobUrl()
   // 清理雪碧图引用
-  spriteImage.value = null
+  cleanupSpriteImage()
   // 重置进度状态
   spriteGenerating.value = false
-  if (player) {
-    player.destroy()
-    player = null
-  }
+  // 清理 Plyr 播放器和所有事件监听器
+  cleanupPlayer()
 })
 </script>
 

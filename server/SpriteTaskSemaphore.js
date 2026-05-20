@@ -17,8 +17,18 @@ class SpriteTaskSemaphore extends EventEmitter {
     this.nextTaskId = 1;
     this.storagePath = storagePath || path.join(__dirname, '..', 'data', 'sprite-tasks.json');
 
+    // 定期清理配置
+    this.MAX_TASK_AGE = 30 * 60 * 1000; // 30分钟
+    this.MAX_TOTAL_TASKS = 100; // 绝对上限
+    this.cleanupInterval = null;
+
     // 尝试从文件加载历史状态
     this._loadFromStorage();
+
+    // 启动定期清理（测试环境除外）
+    if (process.env.NODE_ENV !== 'test') {
+      this.startPeriodicCleanup();
+    }
   }
 
   /**
@@ -321,23 +331,51 @@ class SpriteTaskSemaphore extends EventEmitter {
   }
 
   /**
+   * 启动定期清理
+   */
+  startPeriodicCleanup() {
+    if (this.cleanupInterval) return;
+    this.cleanupInterval = setInterval(() => {
+      this.cleanupOldStatuses(10);
+    }, 5 * 60 * 1000); // 每5分钟清理一次
+    console.log(`[Semaphore] 已启动定期清理，每5分钟执行一次`);
+  }
+
+  /**
+   * 停止定期清理
+   */
+  stopPeriodicCleanup() {
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+      this.cleanupInterval = null;
+      console.log(`[Semaphore] 已停止定期清理`);
+    }
+  }
+
+  /**
    * 清除已完成的任务状态
    * 规则：
    * 1. running 和 pending 状态的任务永远保留
-   * 2. completed 状态的任务只保留最近的 10 个
-   * 3. error 和 aborted 状态直接删除
+   * 2. completed/error/aborted 状态的任务：
+   *    - 超过30分钟的删除
+   *    - 如果总数超过绝对上限100，删除最旧的
+   * 3. completed 状态额外只保留最近10个
    */
   cleanupOldStatuses(keepCompletedCount = 10) {
     // 直接从 taskStatusMap 获取，避免调用 getAllStatuses 导致死循环
     const allStatuses = Array.from(this.taskStatusMap.values());
+    const now = Date.now();
+    let cleanupCount = 0;
 
     console.log(`[Semaphore] 开始清理，当前共 ${allStatuses.length} 个任务`);
 
     // 1. 分离不同状态的任务
     const runningOrPending = allStatuses.filter(s => s.status === 'running' || s.status === 'pending');
-    const completed = allStatuses.filter(s => s.status === 'completed');
+    const ended = allStatuses.filter(s =>
+      s.status === 'completed' || s.status === 'error' || s.status === 'aborted'
+    );
 
-    console.log(`[Semaphore] 其中 running/pending: ${runningOrPending.length}, completed: ${completed.length}`);
+    console.log(`[Semaphore] 其中 running/pending: ${runningOrPending.length}, ended: ${ended.length}`);
 
     // 2. 先清空 taskStatusMap
     this.taskStatusMap.clear();
@@ -347,24 +385,65 @@ class SpriteTaskSemaphore extends EventEmitter {
       this.taskStatusMap.set(s.id, s);
     }
 
-    // 4. completed 按时间倒序排序（最新的在前），只保留最近 10 个
-    if (completed.length > 0) {
-      const sortByTime = (a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt);
-      const sortedCompleted = [...completed].sort(sortByTime); // 拷贝一份再排序
-      const keptCompleted = sortedCompleted.slice(0, keepCompletedCount);
-
-      // 打印每个任务的时间，方便调试
-      console.log(`[Semaphore] completed 任务时间排序：`);
-      sortedCompleted.forEach((s, i) => {
-        const time = new Date(s.updatedAt || s.createdAt).toLocaleTimeString();
-        console.log(`  ${i+1}. ${s.videoTitle || s.videoPath} - ${time} ${i < keepCompletedCount ? '[保留]' : '[删除]'}`);
+    // 4. 处理已结束任务
+    if (ended.length > 0) {
+      // 先按时间过滤掉超过30分钟的
+      const recentEnded = ended.filter(s => {
+        const age = now - (s.endedAt || s.updatedAt || s.createdAt || now);
+        return age <= this.MAX_TASK_AGE;
       });
+      cleanupCount += (ended.length - recentEnded.length);
 
+      // completed 按时间倒序排序（最新的在前），只保留最近 keepCompletedCount 个
+      const completed = recentEnded.filter(s => s.status === 'completed');
+      const others = recentEnded.filter(s => s.status !== 'completed');
+
+      let keptCompleted = [];
+      if (completed.length > 0) {
+        const sortByTime = (a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt);
+        const sortedCompleted = [...completed].sort(sortByTime);
+        keptCompleted = sortedCompleted.slice(0, keepCompletedCount);
+        cleanupCount += (completed.length - keptCompleted.length);
+
+        // 打印每个任务的时间，方便调试
+        console.log(`[Semaphore] completed 任务时间排序：`);
+        sortedCompleted.forEach((s, i) => {
+          const time = new Date(s.updatedAt || s.createdAt).toLocaleTimeString();
+          console.log(`  ${i+1}. ${s.videoTitle || s.videoPath} - ${time} ${i < keepCompletedCount ? '[保留]' : '[删除]'}`);
+        });
+      }
+
+      // 重新添加保留的任务
       for (const s of keptCompleted) {
         this.taskStatusMap.set(s.id, s);
       }
+      for (const s of others) {
+        this.taskStatusMap.set(s.id, s);
+      }
 
-      console.log(`[Semaphore] completed 保留了 ${keptCompleted.length} 个，删除了 ${completed.length - keptCompleted.length} 个`);
+      // 检查是否超过绝对上限，如果超过继续删除最旧的
+      if (this.taskStatusMap.size > this.MAX_TOTAL_TASKS) {
+        const toKeepCount = this.MAX_TOTAL_TASKS - runningOrPending.length;
+        if (toKeepCount > 0) {
+          const kept = Array.from(this.taskStatusMap.values())
+            .filter(s => s.status !== 'running' && s.status !== 'pending')
+            .sort((a, b) => (b.endedAt || b.updatedAt || b.createdAt) - (a.endedAt || a.updatedAt || a.createdAt))
+            .slice(0, toKeepCount);
+
+          // 清空已结束任务，重新添加
+          for (const [id, s] of this.taskStatusMap) {
+            if (s.status !== 'running' && s.status !== 'pending') {
+              this.taskStatusMap.delete(id);
+            }
+          }
+          for (const s of kept) {
+            this.taskStatusMap.set(s.id, s);
+          }
+          cleanupCount += (recentEnded.length - kept.length);
+        }
+      }
+
+      console.log(`[Semaphore] ended 任务保留了 ${this.taskStatusMap.size - runningOrPending.length} 个，删除了 ${cleanupCount} 个`);
     }
 
     console.log(`[Semaphore] 清理完成，当前共 ${this.taskStatusMap.size} 个任务`);
@@ -481,6 +560,13 @@ class SpriteTaskSemaphore extends EventEmitter {
     this._saveToStorage();
     this.emit('statusChanged');
     console.log(`[Semaphore] 清除了 ${toDelete.length} 个已完成任务`);
+  }
+
+  /**
+   * 清理资源（用于测试或关闭时）
+   */
+  cleanup() {
+    this.stopPeriodicCleanup();
   }
 }
 

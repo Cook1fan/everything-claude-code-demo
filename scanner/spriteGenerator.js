@@ -5,7 +5,16 @@ const os = require('os');
 const config = require('./config');
 
 // 跟踪正在运行的 FFmpeg 进程
-const runningProcesses = new Map(); // videoPath -> { ffmpegProc, tempDir, abortFlag }
+const runningProcesses = new Map(); // videoPath -> { ffmpegProc, tempDir, abortFlag, startedAt }
+
+// 跟踪所有临时目录，用于进程退出时清理
+const TEMP_DIRS = new Set();
+
+// 超时配置（30分钟）
+const PROCESS_TIMEOUT = 30 * 60 * 1000;
+
+// 定期清理超时进程（每5分钟检查一次）
+let staleProcessCheckInterval = null;
 
 // 根据视频时长动态计算最佳帧间隔
 // 表格规则：
@@ -87,10 +96,55 @@ function getVideoDuration(ffmpegPath, videoPath) {
   });
 }
 
+// 注册临时目录，便于统一清理
+function registerTempDir(tempDir) {
+  TEMP_DIRS.add(tempDir);
+}
+
+// 清理所有已注册的临时目录
+function cleanupAllTempDirs() {
+  console.log('[SpriteGenerator] 清理所有临时目录...');
+  for (const tempDir of TEMP_DIRS) {
+    try {
+      if (fs.existsSync(tempDir)) {
+        cleanupTempDir(tempDir);
+        console.log(`[SpriteGenerator] 已删除临时目录: ${tempDir}`);
+      }
+    } catch (err) {
+      console.error(`[SpriteGenerator] 删除临时目录失败 ${tempDir}:`, err);
+    }
+  }
+  TEMP_DIRS.clear();
+}
+
+// 清理超时进程
+function cleanupStaleProcesses() {
+  const now = Date.now();
+  for (const [videoPath, entry] of runningProcesses) {
+    if (now - entry.startedAt > PROCESS_TIMEOUT) {
+      console.warn(`[SpriteGenerator] 清理超时进程: ${videoPath}`);
+      try {
+        if (entry.ffmpegProc) {
+          entry.ffmpegProc.kill('SIGKILL');
+        }
+        // 清理临时目录
+        if (entry.tempDir) {
+          cleanupTempDir(entry.tempDir);
+          TEMP_DIRS.delete(entry.tempDir);
+        }
+        runningProcesses.delete(videoPath);
+      } catch (e) {
+        console.warn(`[SpriteGenerator] 清理超时进程失败 ${videoPath}:`, e);
+      }
+    }
+  }
+}
+
 // 在系统临时目录创建临时文件夹
 function createTempDir() {
   const tempDir = path.join(os.tmpdir(), `sprite-gen-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
   fs.mkdirSync(tempDir, { recursive: true });
+  registerTempDir(tempDir);
   return tempDir;
 }
 
@@ -113,6 +167,7 @@ function cleanupTempDir(tempDir) {
         }
       }
       fs.rmdirSync(tempDir);
+      TEMP_DIRS.delete(tempDir);
     }
   } catch (err) {
     console.warn('清理临时目录失败:', tempDir, err.message);
@@ -213,7 +268,7 @@ function extractFrames(ffmpegPath, videoPath, tempDir, interval, duration, thumb
     });
 
     // 跟踪这个进程
-    runningProcesses.set(videoPath, { ffmpegProc: proc, tempDir, abortFlag: false });
+    runningProcesses.set(videoPath, { ffmpegProc: proc, tempDir, abortFlag: false, startedAt: Date.now() });
 
     frameCheckInterval = setInterval(() => {
       // 检查是否被中止
@@ -593,6 +648,37 @@ async function generateSprite(videoPath, options = {}, onProgress, abortControll
     if (tempDir) {
       cleanupTempDir(tempDir);
     }
+  }
+}
+
+// 进程退出时清理所有临时目录
+process.on('exit', cleanupAllTempDirs);
+process.on('SIGINT', () => {
+  cleanupAllTempDirs();
+  process.exit(0);
+});
+process.on('SIGTERM', () => {
+  cleanupAllTempDirs();
+  process.exit(0);
+});
+process.on('uncaughtException', (err) => {
+  console.error('未捕获的异常:', err);
+  cleanupAllTempDirs();
+  process.exit(1);
+});
+
+// 启动定期清理超时进程（每5分钟检查一次）
+if (process.env.NODE_ENV !== 'test') {
+  staleProcessCheckInterval = setInterval(cleanupStaleProcesses, 5 * 60 * 1000);
+}
+
+/**
+ * 清理资源（用于测试）
+ */
+function cleanup() {
+  if (staleProcessCheckInterval) {
+    clearInterval(staleProcessCheckInterval);
+    staleProcessCheckInterval = null;
   }
 }
 
