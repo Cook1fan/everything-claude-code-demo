@@ -1,8 +1,11 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { Video, VideoData, ScanStatus, DirectoryTreeNode, SpriteInfo, SpriteStatus, BatchSpriteStats } from '@/types'
+import type { Video, VideoData, ScanStatus, DirectoryTreeNode, SpriteInfo, SpriteStatus, BatchSpriteStats, FrameExtractStatus } from '@/types'
 import * as indexedDB from '@/utils/indexedDB'
 import { usePlayHistoryStore } from './playHistoryStore'
+
+// 帧提取状态缓存
+const frameTaskStatusMap = ref<Map<string, FrameExtractStatus>>(new Map())
 
 const API_BASE = '/api'
 
@@ -93,7 +96,7 @@ export const useVideoStore = defineStore('video', () => {
             let allStatus = Array.isArray(message.data.allStatus) ? message.data.allStatus : []
 
             // 按时间倒序排序所有任务（最新的在前面）
-            allStatus.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+            allStatus.sort((a: any, b: any) => (b.createdAt || 0) - (a.createdAt || 0))
 
             // 检测哪些任务刚完成
             const justCompletedIds: string[] = []
@@ -196,6 +199,21 @@ export const useVideoStore = defineStore('video', () => {
               // 扫描完成后自动刷新视频列表
               loadVideos()
             }
+          } else if (message.type === 'frameExtractStatus') {
+            // 处理帧提取状态更新
+            const { taskId, task } = message.data
+            if (taskId && task) {
+              frameTaskStatusMap.value.set(taskId, task)
+            } else if (message.data.tasks) {
+              // 初始加载所有任务
+              const newMap = new Map<string, FrameExtractStatus>()
+              for (const t of message.data.tasks) {
+                if (t.id) {
+                  newMap.set(t.id, t)
+                }
+              }
+              frameTaskStatusMap.value = newMap
+            }
           }
         } catch (err) {
           console.error('解析 WebSocket 消息失败:', err)
@@ -271,7 +289,7 @@ export const useVideoStore = defineStore('video', () => {
         const allStatus = data.allStatus
 
         // 按时间倒序排序所有任务（最新的在前面）
-        allStatus.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+        allStatus.sort((a: any, b: any) => (b.createdAt || 0) - (a.createdAt || 0))
 
         // 检测哪些任务刚完成（与旧状态比较）
         const justCompletedIds: string[] = []

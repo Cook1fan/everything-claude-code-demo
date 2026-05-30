@@ -185,6 +185,13 @@
               >
                 {{ spriteGenerating ? '⏳ 生成中...' : '🗂️ 雪碧图' }}
               </button>
+              <button
+                @click="goToFrameExtract"
+                class="px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-md transition-colors font-medium text-sm"
+                title="提取帧"
+              >
+                📸 提取帧
+              </button>
             </div>
 
             <!-- 错误提示 -->
@@ -522,6 +529,14 @@ const nextVideo = computed(() => {
 
 function goBack() {
   router.push({ name: 'home' })
+}
+
+function goToFrameExtract() {
+  if (video.value) {
+    router.push({ name: 'frameExtract', query: { videoId: video.value.id, from: 'video' } })
+  } else {
+    router.push({ name: 'frameExtract' })
+  }
 }
 
 function playVideo(v: Video) {

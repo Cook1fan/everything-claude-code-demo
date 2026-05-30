@@ -123,3 +123,53 @@ export interface BatchSpriteStats {
     message?: string;
   };
 }
+
+// Frame extractor types
+export interface FrameExtractStatus {
+  id: string;
+  videoPath?: string;
+  videoId?: string;
+  videoTitle?: string;
+  status: 'pending' | 'running' | 'completed' | 'error' | 'aborted';
+  stage?: 'starting' | 'analyzing' | 'extracting' | 'packaging' | 'complete';
+  message?: string;
+  percent?: number;
+  totalFrames?: number;
+  extractedFrames?: number;
+  error?: boolean;
+  errorMessage?: string;
+  createdAt?: number;
+  updatedAt?: number;
+  outputPath?: string;
+  outputFileName?: string;
+  frameFiles?: string[];
+  params?: FrameExtractParams;
+  totalTime?: number;
+}
+
+export interface FrameExtractParams {
+  startTime: number; // Start time in seconds
+  endTime: number; // End time in seconds
+  interval: number; // Frame interval in seconds
+  quality: number; // JPEG quality (1-31, 1=best)
+  outputWidth: number; // Output width in pixels (-1=keep ratio)
+  outputHeight: number; // Output height in pixels (-1=keep ratio)
+  format: 'jpg' | 'png' | 'webp'; // Output image format
+  outputDir?: string; // Output directory (optional)
+}
+
+export interface FrameExtractRequest {
+  videoPath: string;
+  params: FrameExtractParams;
+}
+
+export interface FrameExtractResponse {
+  success: boolean;
+  message: string;
+  taskId?: string;
+}
+
+export interface FrameExtractListResponse {
+  inProgress: boolean;
+  tasks: FrameExtractStatus[];
+}

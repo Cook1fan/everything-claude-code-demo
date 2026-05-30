@@ -11,6 +11,15 @@ function getAllowedDirectories() {
   if (!allowed.includes(outputDir)) {
     allowed.push(outputDir);
   }
+  // 添加用户 Downloads 目录到允许列表
+  const downloadsDir = 'C:/Users/cook1/Downloads';
+  const downloadsRoot = 'C:/Downloads';
+  if (!allowed.includes(downloadsDir)) {
+    allowed.push(downloadsDir);
+  }
+  if (!allowed.includes(downloadsRoot)) {
+    allowed.push(downloadsRoot);
+  }
   return allowed;
 }
 

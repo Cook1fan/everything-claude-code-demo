@@ -1,6 +1,7 @@
 const WebSocket = require('ws');
 const { getVideoTitleByPath } = require('./middleware/video-info');
 const SpriteTaskSemaphore = require('./SpriteTaskSemaphore');
+const { frameTaskSemaphore } = require('../scanner/FrameTaskSemaphore');
 
 let wss = null;
 const clients = new Set();
@@ -150,6 +151,22 @@ function broadcastScanStatus(status) {
   });
 }
 
+function broadcastFrameExtractStatus(taskId, task, eventType) {
+  const message = JSON.stringify({
+    type: 'frameExtractStatus',
+    data: {
+      taskId,
+      task,
+      eventType
+    }
+  });
+  clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(message);
+    }
+  });
+}
+
 function sendSpriteStatusToClient(ws) {
   // 新连接时清理一次
   spriteSemaphore.cleanupOldStatuses(10);
@@ -177,6 +194,19 @@ function sendSpriteStatusToClient(ws) {
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(batchMessage);
     }
+  }
+
+  // Also send frame extract status
+  const frameTasks = frameTaskSemaphore.getAllTasks();
+  const frameMessage = JSON.stringify({
+    type: 'frameExtractStatus',
+    data: {
+      inProgress: frameTaskSemaphore.getActiveCount() > 0,
+      tasks: frameTasks
+    }
+  });
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send(frameMessage);
   }
 }
 
@@ -236,6 +266,7 @@ module.exports = {
   broadcastSpriteStatus,
   broadcastBatchSpriteStatus,
   broadcastScanStatus,
+  broadcastFrameExtractStatus,
   sendSpriteStatusToClient,
   getSpriteSemaphore,
   getSpriteGenerationInProgressSet, // 向后兼容

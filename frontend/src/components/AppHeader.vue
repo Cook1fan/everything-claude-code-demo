@@ -30,6 +30,15 @@
           >
             📊 播放历史
           </router-link>
+          <router-link
+            to="/frame-extract"
+            :class="[
+              'px-4 py-2 rounded-lg transition-colors flex items-center gap-2',
+              isActiveRoute('/frame-extract') ? 'bg-purple-600 text-white' : 'text-slate-300 hover:bg-slate-700'
+            ]"
+          >
+            📸 帧提取
+          </router-link>
 
           <!-- 雪碧图进度指示器 -->
           <div class="sprite-progress-wrapper relative flex items-center gap-2 ml-2">

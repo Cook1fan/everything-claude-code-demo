@@ -5,6 +5,7 @@ const videosRouter = require('./routes/videos');
 const scanRouter = require('./routes/scan');
 const filesRouter = require('./routes/files');
 const spriteRouter = require('./routes/sprite');
+const frameExtractRouter = require('./routes/frameExtract');
 
 const createApp = () => {
   const app = express();
@@ -18,6 +19,7 @@ const createApp = () => {
   app.use('/api/scan', scanRouter);
   app.use('/api', filesRouter);
   app.use('/api/sprite', spriteRouter);
+  app.use('/api/frame-extract', frameExtractRouter);
 
   return app;
 };
