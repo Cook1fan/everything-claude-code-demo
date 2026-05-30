@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-本文件为 Claude Code (claude.ai/code) 在处理此仓库代码时提供指导。
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## 项目概述
 
@@ -84,6 +84,10 @@ GET  /api/sprite/info          - 获取雪碧图元数据
 POST /api/sprite/batch-generate - 批量生成雪碧图
 GET  /api/sprite/batch-status  - 获取批量生成状态
 POST /api/sprite/batch-abort   - 中止批量生成
+POST /api/frame-extract/start  - 开始帧提取任务
+GET  /api/frame-extract/status - 获取所有任务状态
+POST /api/frame-extract/abort  - 中止任务
+GET  /api/frame-extract/download/:taskId - 下载提取结果
 WebSocket: ws://localhost:3000 - 实时状态更新
 ```
 
@@ -91,24 +95,26 @@ WebSocket: ws://localhost:3000 - 实时状态更新
 
 | 目录 | 用途 |
 |-----------|---------|
-| `frontend/src/components/` | Vue 组件 (VideoCard 等) |
-| `frontend/src/views/` | 页面组件 (HomeView, VideoView) |
-| `frontend/src/stores/` | Pinia 存储 (videoStore, playHistoryStore) |
+| `frontend/src/components/` | Vue 组件 |
+| `frontend/src/components/FrameExtract/` | 帧提取功能组件 |
+| `frontend/src/views/` | 页面组件 (HomeView, VideoView, FrameExtractView) |
+| `frontend/src/stores/` | Pinia 存储 (videoStore, playHistoryStore, frameExtractStore) |
 | `frontend/src/utils/` | 工具函数 (indexedDB 本地存储) |
-| `scanner/` | 目录扫描器 + 雪碧图生成器 (FFmpeg) |
-| `server/` | Express API + WebSocket 服务器 |
+| `scanner/` | 目录扫描器 + FFmpeg 雪碧图/帧提取 |
+| `server/routes/` | Express 路由 (sprite.js, frameExtract.js) |
 
 ### 配置
 
 编辑 `scanner/config.js` 可以：
 - 添加/删除要扫描的硬盘路径
 - 调整视频/海报扩展名
-- 配置 FFmpeg 雪碧图生成参数（间隔、列数、质量）
+- 配置 FFmpeg 雪碧图/帧提取参数
 
 ### 重要功能
 
 - **雪碧图缩略图**: 通过 FFmpeg 生成，使用 WebVTT 显示为悬停预览
+- **帧提取**: 从视频中按时间间隔提取帧，支持 JPG/PNG/WebP 格式
 - **播放历史**: 存储在本地 IndexedDB 中，包含续播位置和评分
 - **视频时间戳**: 用户可以标记和标注"精彩时间点"
-- **批量操作**: 多视频雪碧图生成，带线程池
-- **实时更新**: 雪碧图生成期间通过 WebSocket 显示进度
+- **批量操作**: 多视频雪碧图生成，带线程池；多任务帧提取
+- **实时更新**: 雪碧图和帧提取期间通过 WebSocket 显示进度
