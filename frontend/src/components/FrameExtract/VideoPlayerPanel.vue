@@ -1,10 +1,10 @@
 <template>
-  <main class="flex-1 flex flex-col bg-black">
-    <div class="flex-1 flex items-center justify-center bg-black relative">
+  <main class="flex-1 flex flex-col bg-black overflow-hidden min-h-0">
+    <div class="flex-1 min-h-0 flex items-center justify-center bg-black relative p-4">
       <video
         v-if="selectedVideo"
         ref="videoRef"
-        class="max-h-full max-w-full"
+        class="max-w-full max-h-full object-contain"
         :src="store.getVideoUrl(selectedVideo)"
         @timeupdate="onTimeUpdate"
         @loadedmetadata="onVideoLoaded"
@@ -17,8 +17,8 @@
     </div>
 
     <!-- 播放控制栏 -->
-    <div class="bg-slate-850 border-t border-slate-700 p-4">
-      <div class="flex items-center justify-center gap-3">
+    <div class="bg-slate-850 border-t border-slate-700 p-4 shrink-0">
+      <div class="flex items-center justify-center gap-3 flex-wrap">
         <button
           @click="jumpToStartTime"
           class="px-2.5 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 rounded transition-all duration-200"
@@ -35,7 +35,7 @@
         </button>
         <button
           @click="togglePlay"
-          class="px-3 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-full transition-all duration-200 shadow-lg shadow-blue-900/30"
+          class="px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-full transition-all duration-200 shadow-lg shadow-blue-900/30 text-lg"
         >
           {{ isPlaying ? '⏸' : '▶' }}
         </button>

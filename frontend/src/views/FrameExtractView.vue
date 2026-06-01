@@ -14,6 +14,7 @@
         <!-- 中栏：视频播放 -->
         <VideoPlayerPanel
           ref="videoPlayerRef"
+          class="min-w-0"
           :selected-video="selectedVideo"
           :selected-start-time="selectedStartTime"
           :selected-end-time="selectedEndTime"
