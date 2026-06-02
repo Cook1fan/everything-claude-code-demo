@@ -345,7 +345,7 @@ export const usePlayHistoryStore = defineStore('playHistory', () => {
     return playRecords.value.get(videoId)?.timestamps || []
   }
 
-  // 添加精彩时间点
+  // 添加精彩时间点（评分根据标记数量自动计算，最多10星）
   function addTimestamp(videoId: string, time: number, label?: string, screenshot?: string) {
     const existing = playRecords.value.get(videoId)
     const timestamp: VideoTimestamp = {
@@ -358,7 +358,9 @@ export const usePlayHistoryStore = defineStore('playHistory', () => {
 
     if (existing) {
       const timestamps = [...(existing.timestamps || []), timestamp].sort((a, b) => a.time - b.time)
-      const updated = { ...existing, timestamps }
+      const newCount = timestamps.length
+      const rating = Math.min(newCount, 10) // 评分 = 标记数量，最多10星
+      const updated = { ...existing, timestamps, rating }
       playRecords.value.set(videoId, updated)
       saveToDB(updated)
     } else {
@@ -368,6 +370,7 @@ export const usePlayHistoryStore = defineStore('playHistory', () => {
         totalPlayTime: 0,
         lastPlayedAt: Date.now(),
         timestamps: [timestamp],
+        rating: 1, // 第一个标记 = 1星
       }
       playRecords.value.set(videoId, newRecord)
       saveToDB(newRecord)
@@ -375,11 +378,14 @@ export const usePlayHistoryStore = defineStore('playHistory', () => {
     return timestamp
   }
 
-  // 删除精彩时间点
+  // 删除精彩时间点（评分随标记数量自动调整）
   function removeTimestamp(videoId: string, timestampId: string) {
     const existing = playRecords.value.get(videoId)
     if (existing && existing.timestamps) {
-      const updated = { ...existing, timestamps: existing.timestamps.filter(t => t.id !== timestampId) }
+      const timestamps = existing.timestamps.filter(t => t.id !== timestampId)
+      const newCount = timestamps.length
+      const rating = Math.min(newCount, 10) // 评分 = 标记数量，最多10星
+      const updated = { ...existing, timestamps, rating }
       playRecords.value.set(videoId, updated)
       saveToDB(updated)
     }

@@ -171,13 +171,6 @@
                 ⭐ 标记
               </button>
               <button
-                @click="takeScreenshot"
-                class="px-3 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-md transition-colors font-medium text-sm"
-                title="截取当前画面"
-              >
-                📷 截图
-              </button>
-              <button
                 @click="generateSpriteSheet"
                 :disabled="spriteGenerating"
                 class="px-3 py-2 bg-teal-600 hover:bg-teal-700 disabled:bg-slate-600 disabled:cursor-not-allowed text-white rounded-md transition-colors font-medium text-sm"
@@ -208,11 +201,11 @@
               <h3 class="text-white font-semibold text-base">⭐ 精彩时间点</h3>
               <span class="text-slate-400 text-sm">{{ timestamps.length }} 个</span>
             </div>
-            <div class="flex gap-3 overflow-x-auto pb-2">
+            <div class="flex flex-wrap gap-3">
               <div
                 v-for="ts in timestamps"
                 :key="ts.id"
-                class="group relative w-48 shrink-0 bg-slate-700 rounded-md overflow-hidden cursor-pointer hover:ring-2 hover:ring-purple-500 transition-all"
+                class="group relative w-48 bg-slate-700 rounded-md overflow-hidden cursor-pointer hover:outline-2 hover:outline-purple-400 hover:outline-offset-2 hover:scale-105 transition-all duration-200 shadow-lg hover:shadow-purple-500/30"
                 @click="jumpToTimestamp(ts.time)"
                 @contextmenu.prevent="deleteTimestamp(ts.id)"
               >
@@ -234,7 +227,7 @@
                   <!-- 删除按钮 -->
                   <button
                     @click.stop="deleteTimestamp(ts.id)"
-                    class="absolute top-1 right-1 w-5 h-5 bg-red-600 hover:bg-red-700 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-white text-sm"
+                    class="absolute top-1 right-1 w-6 h-6 bg-red-600/80 hover:bg-red-600 backdrop-blur-sm rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-200 text-white text-sm shadow-md hover:shadow-lg hover:scale-110"
                     title="删除"
                   >
                     ×
@@ -438,14 +431,8 @@ const video = computed(() => store.videos.find(v => v.id === route.params.id))
 const playCount = computed(() => video.value ? playHistory.getPlayCount(video.value.id) : 0)
 const totalPlayTime = computed(() => video.value ? playHistory.getTotalPlayTime(video.value.id) : 0)
 
-const rating = computed({
-  get: () => video.value ? playHistory.getRating(video.value.id) : 0,
-  set: (value: number) => {
-    if (video.value) {
-      playHistory.setRating(video.value.id, value)
-    }
-  },
-})
+// 评分根据标记数量自动计算（只读）
+const rating = computed(() => video.value ? playHistory.getRating(video.value.id) : 0)
 
 const isBadQuality = computed({
   get: () => video.value ? playHistory.getIsBadQuality(video.value.id) : false,

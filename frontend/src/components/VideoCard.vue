@@ -129,11 +129,10 @@
             {{ totalPlayTime > 0 ? playHistory.formatPlayTime(totalPlayTime) : '未观看' }}
           </span>
         </div>
-        <!-- 评分 -->
+        <!-- 评分（根据标记数量自动计算） -->
         <div class="mt-2">
           <StarRating
             :modelValue="rating"
-            @update:modelValue="setRating"
             readonly
           />
         </div>
@@ -141,16 +140,40 @@
 
       <!-- 按钮区域 -->
       <div class="mt-3 pt-3 border-t border-slate-700 flex gap-2">
-        <!-- 雪碧图生成按钮 -->
-        <button
+        <!-- 雪碧图生成按钮 - 按住读条 -->
+        <div
           v-if="!video.spritePath && !isGeneratingSprite"
-          @click.stop="generateSpriteSheet"
-          :disabled="isGeneratingSprite"
-          class="flex-1 px-2 py-1 bg-teal-600/20 hover:bg-teal-600/40 disabled:bg-slate-600/20 disabled:cursor-not-allowed text-teal-400 hover:text-teal-300 disabled:text-slate-500 rounded text-[11px] transition-colors flex items-center justify-center gap-1"
+          class="flex-1 relative"
         >
-          <span>🗂️</span>
-          <span class="hidden sm:inline">生成</span>
-        </button>
+          <!-- 进度条底层 -->
+          <div class="absolute inset-0 rounded bg-slate-700/50 overflow-hidden">
+            <!-- 进度填充 -->
+            <div
+              class="absolute inset-y-0 left-0 bg-gradient-to-r from-teal-500/40 to-teal-400/60 transition-all duration-75 ease-out"
+              :style="{ width: `${generateProgress}%` }"
+            >
+              <!-- 进度条光泽效果 -->
+              <div class="absolute inset-0 bg-gradient-to-b from-white/20 via-transparent to-transparent"></div>
+            </div>
+          </div>
+          <!-- 按钮内容 -->
+          <button
+            @mousedown="startGenerateProgress"
+            @mouseup="cancelGenerateProgress"
+            @mouseleave="cancelGenerateProgress"
+            @touchstart.prevent="startGenerateProgress"
+            @touchend="cancelGenerateProgress"
+            @touchcancel="cancelGenerateProgress"
+            class="w-full px-2 py-1 text-[11px] transition-colors flex items-center justify-center gap-1 relative z-10"
+            :class="generateProgress > 0 ? 'text-white font-medium' : 'text-teal-400 hover:text-teal-300'"
+          >
+            <span v-if="generateProgress > 0" class="animate-pulse">⚡</span>
+            <span v-else>🗂️</span>
+            <span class="hidden sm:inline">
+              {{ generateProgress > 0 ? '生成中...' : '生成' }}
+            </span>
+          </button>
+        </div>
         <!-- 如果已经有缩略图，删除按钮占满宽度 -->
         <button
           v-if="video.spritePath || isGeneratingSprite"
@@ -196,6 +219,11 @@ const imageError = ref(false)
 const imageLoaded = ref(false)
 const ffmpegAvailable = ref<boolean | null>(null)
 
+// 生成按钮读条进度
+const generateProgress = ref(0)
+let generateProgressTimer: number | null = null
+const GENERATE_HOLD_DURATION = 1000 // 读条满需要按住的时间（毫秒）
+
 const posterUrl = computed(() => {
   if (!props.video.posterPath) return ''
   return store.getImageUrl(props.video)
@@ -233,10 +261,6 @@ const isGeneratingSprite = computed(() => {
   return (status.status === 'pending' || status.status === 'running') && !status.error
 })
 
-function setRating(value: number) {
-  playHistory.setRating(props.video.id, value)
-}
-
 function handleImageLoad() {
   imageLoaded.value = true
 }
@@ -253,6 +277,36 @@ async function checkFFmpeg() {
   return status
 }
 
+// 按住生成按钮开始读条
+function startGenerateProgress() {
+  if (generateProgressTimer) return
+
+  const startTime = performance.now()
+
+  const updateProgress = (currentTime: number) => {
+    const elapsed = currentTime - startTime
+    generateProgress.value = Math.min((elapsed / GENERATE_HOLD_DURATION) * 100, 100)
+
+    if (generateProgress.value >= 100) {
+      // 读条满了，触发请求（进度条会通过 isGeneratingSprite 状态变化自动消失）
+      generateProgressTimer = null
+      generateSpriteSheet()
+    } else {
+      generateProgressTimer = requestAnimationFrame(updateProgress)
+    }
+  }
+  generateProgressTimer = requestAnimationFrame(updateProgress)
+}
+
+// 取消生成读条
+function cancelGenerateProgress() {
+  if (generateProgressTimer) {
+    cancelAnimationFrame(generateProgressTimer)
+    generateProgressTimer = null
+  }
+  generateProgress.value = 0
+}
+
 // 生成雪碧图
 async function generateSpriteSheet() {
   const ffmpegStatus = await checkFFmpeg()
@@ -266,14 +320,8 @@ async function generateSpriteSheet() {
   let force = false
 
   if (hasSprite) {
-    if (!confirm('该视频已生成过雪碧图，是否要重新生成？\n（重新生成会覆盖旧的雪碧图）')) {
-      return
-    }
+    // 已存在则强制重新生成（用户按住按钮即确认）
     force = true
-  } else {
-    if (!confirm('生成雪碧图可能需要几分钟时间，确定要继续吗？')) {
-      return
-    }
   }
 
   const result = await store.generateSprite(props.video.videoPath, force)

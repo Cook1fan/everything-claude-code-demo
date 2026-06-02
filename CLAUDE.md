@@ -28,6 +28,12 @@ npm run server
 
 # 只启动前端
 npm run frontend
+
+# 前端构建（生产环境）
+cd frontend && npm run build
+
+# 前端类型检查
+cd frontend && npm run type-check  # 如果配置了的话
 ```
 
 ## 架构
@@ -63,9 +69,24 @@ video-browser/
 **VideoPlayRecord**:
 - 播放次数和总播放时长
 - 用于续播的最后播放位置
-- 1-10 星评分
+- 1-10 星评分（**根据标记数量自动计算**：1个标记=1星，2个=2星...最多10星）
 - 视频时间戳（精彩时间点）
 - 质量标记
+
+### 评分系统
+
+评分由标记数量自动计算，无法手动设置：
+- `addTimestamp` / `removeTimestamp` 时自动更新评分
+- `rating = Math.min(timestampCount, 10)`
+- 相关文件：`frontend/src/stores/playHistoryStore.ts`
+
+### 目录排序规则
+
+智能排序按层级采用不同规则：
+- **一级目录**：拉丁字母优先，然后 localeCompare
+- **二级目录**：年份数字升序（如 2020, 2021, 2022...）
+- **三级目录**：日期格式升序（YYYY-MM-DD 或 YYYYMMDD）
+- 相关文件：`scanner/scan.js` 的 `smartDirectorySort`，`frontend/src/components/TreeNode.vue`
 
 ### API 端点
 
@@ -118,3 +139,4 @@ WebSocket: ws://localhost:3000 - 实时状态更新
 - **视频时间戳**: 用户可以标记和标注"精彩时间点"
 - **批量操作**: 多视频雪碧图生成，带线程池；多任务帧提取
 - **实时更新**: 雪碧图和帧提取期间通过 WebSocket 显示进度
+- **生成按钮交互**: 按住生成按钮 1 秒读条，松开取消，读条满自动触发（无确认弹窗）

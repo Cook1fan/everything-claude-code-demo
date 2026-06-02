@@ -309,10 +309,60 @@ function scanDirectoryRecursive(dirPath, hardDrive, dirCache, results) {
     }
   }
 
-  // 按名称排序子目录
-  treeNode.children.sort((a, b) => a.name.localeCompare(b.name));
+  // 按名称排序子目录（智能排序：一级目录按字母，二级目录按年份，三级目录按日期）
+  treeNode.children.sort(smartDirectorySort);
 
   return treeNode;
+}
+
+// 智能目录排序：根据目录层级采用不同排序规则
+function smartDirectorySort(a, b) {
+  const depthA = (a.path.match(/\//g) || []).length;
+  const depthB = (b.path.match(/\//g) || []).length;
+
+  // 一级目录（盘符下）：拉丁字母优先，然后按 localeCompare
+  if (depthA === depthB && depthA <= 1) {
+    const isLatinA = /^[A-Za-z]/.test(a.name);
+    const isLatinB = /^[A-Za-z]/.test(b.name);
+    if (isLatinA && !isLatinB) return -1;
+    if (!isLatinA && isLatinB) return 1;
+    return a.name.localeCompare(b.name);
+  }
+
+  // 二级目录（年份）：按数字排序
+  const yearA = parseInt(a.name, 10);
+  const yearB = parseInt(b.name, 10);
+  if (!isNaN(yearA) && !isNaN(yearB) && yearA > 1900 && yearB > 1900) {
+    return yearA - yearB;
+  }
+
+  // 三级目录（日期格式 YYYY-MM-DD 或 YYYYMMDD）：按日期排序
+  const dateA = extractDate(a.name);
+  const dateB = extractDate(b.name);
+  if (dateA && dateB) {
+    return dateA - dateB;
+  }
+
+  // 默认按字母排序
+  return a.name.localeCompare(b.name);
+}
+
+// 从目录名提取日期用于排序
+function extractDate(dirName) {
+  // 支持格式：2024-01-15、20240115、2024_01_15、2024.01.15 等
+  const patterns = [
+    /(\d{4})[-_.](\d{1,2})[-_.](\d{1,2})/,  // 2024-01-15 或 2024_01_15 或 2024.01.15
+    /(\d{4})(\d{2})(\d{2})/,                 // 20240115
+  ];
+
+  for (const pattern of patterns) {
+    const match = dirName.match(pattern);
+    if (match) {
+      const [, year, month, day] = match;
+      return new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+    }
+  }
+  return null;
 }
 
 // 主扫描函数
