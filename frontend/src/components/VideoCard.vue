@@ -39,7 +39,7 @@
       <!-- 质量不好标记 -->
       <div v-if="isBadQuality" class="absolute top-2 left-2">
         <span class="bg-red-600 text-white text-xs px-2 py-1 rounded font-medium shadow-lg">
-          🚫 质量不好
+          🚫 无法生成雪碧图
         </span>
       </div>
 

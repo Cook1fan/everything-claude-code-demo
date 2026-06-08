@@ -53,7 +53,7 @@
                   v-model="isBadQuality"
                   class="w-4 h-4 rounded border-slate-600 bg-slate-700 text-red-500 focus:ring-red-500 focus:ring-offset-slate-80"
                 />
-                <span class="text-slate-300">🚫 质量不好</span>
+                <span class="text-slate-300">🚫 无法生成雪碧图</span>
               </label>
 
               <!-- 播放统计 -->
