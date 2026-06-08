@@ -8,13 +8,21 @@
       >
         <div class="p-4 flex-1 flex flex-col">
           <!-- 搜索框 -->
-          <div class="mb-4">
+          <div class="mb-4 relative">
             <input
               v-model="store.searchQuery"
               type="text"
               placeholder="搜索视频..."
-              class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:border-blue-500"
+              class="w-full px-3 py-2 pr-8 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:border-blue-500"
             />
+            <button
+              v-if="store.searchQuery"
+              @click="store.searchQuery = ''"
+              class="absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center text-slate-400 hover:text-white transition-colors"
+              title="清除搜索"
+            >
+              ×
+            </button>
           </div>
 
           <!-- 全部按钮 -->
