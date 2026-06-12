@@ -5,276 +5,286 @@
         <p class="text-slate-400">视频未找到</p>
       </div>
 
-      <div v-else class="flex-1 flex flex-col overflow-hidden">
-        <!-- 顶部导航栏 -->
-        <div class="flex items-center gap-3 px-4 py-3 bg-slate-800/50 border-b border-slate-700 shrink-0">
-          <button
-            @click="goBack"
-            class="flex items-center gap-2 px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors text-sm"
-          >
-            ← 返回
-          </button>
-          <h1 class="text-lg font-bold text-white truncate flex-1">
-            {{ video.title }}
-          </h1>
-          <div class="flex items-center gap-2">
+      <div v-else class="flex-1 flex overflow-hidden">
+        <!-- 左主区 -->
+        <div class="flex-1 min-w-0 flex flex-col overflow-hidden">
+          <!-- 顶部导航：返回 / 上下一个 -->
+          <div class="flex items-center gap-2 px-4 py-2.5 bg-slate-800/60 border-b border-slate-700 shrink-0">
+            <button
+              @click="goBack"
+              class="flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded-md transition-colors text-sm"
+            >
+              ← 返回
+            </button>
             <button
               v-if="prevVideo"
               @click="playVideo(prevVideo)"
-              class="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors text-sm"
+              class="flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded-md transition-colors text-sm"
             >
-              上一个
+              ← 上一个
             </button>
             <button
               v-if="nextVideo"
               @click="playVideo(nextVideo)"
-              class="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors text-sm"
+              class="flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded-md transition-colors text-sm"
             >
-              下一个
+              下一个 →
             </button>
+          </div>
+
+          <!-- 可滚动主内容 -->
+          <div class="flex-1 overflow-y-auto">
+            <!-- 标题区 -->
+            <div class="bg-slate-800/40 border-b border-slate-700 px-6 py-3">
+              <h1 class="text-base font-semibold text-white leading-snug break-words">
+                {{ video.title }}
+              </h1>
+              <div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-400">
+                <span v-if="playCount > 0" class="text-slate-300">
+                  ▶ <span class="font-medium text-white">{{ playCount }}</span> 次
+                </span>
+                <span v-if="totalPlayTime > 0" class="text-slate-300">
+                  ⏱️ <span class="text-white">{{ playHistory.formatPlayTime(totalPlayTime) }}</span>
+                </span>
+                <span v-if="displayDuration" class="text-slate-300">
+                  时长 <span class="text-white">{{ displayDuration }}</span>
+                </span>
+                <span class="truncate max-w-[60ch]" :title="video.directory">
+                  📁 <span class="text-slate-300">{{ video.directory }}</span>
+                </span>
+                <span v-if="video.fileSize">
+                  <span class="text-slate-500">大小</span>
+                  <span class="ml-1 text-slate-300">{{ store.formatFileSize(video.fileSize) }}</span>
+                </span>
+                <span>
+                  <span class="text-slate-500">格式</span>
+                  <span class="ml-1 text-slate-300 uppercase">{{ video.videoExtension.slice(1) }}</span>
+                </span>
+              </div>
+            </div>
+
+            <!-- 播放器
+                 大屏下用 max-h-[70vh] 限高，避免 16:9 跟着列宽无限放大撑出可视范围。
+                 宽度按比例联动，配合 max-width 封顶，mx-auto 居中。 -->
+            <div
+              class="bg-black mx-auto aspect-video max-h-[70vh] w-full relative"
+              style="max-width: min(100%, calc(70vh * 16 / 9));"
+            >
+              <video
+                ref="videoRef"
+                class="w-full h-full object-contain"
+                playsinline
+                @error="handleVideoError"
+              />
+            </div>
+
+            <!-- 控制行1: 播放控制 + 倍速 -->
+            <div class="bg-slate-800/60 px-4 py-3 border-b border-slate-700">
+              <div class="flex items-center justify-center gap-2 flex-wrap">
+                <button
+                  @click="resetToStart"
+                  class="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-md transition-colors font-medium text-sm"
+                  title="重置到开头"
+                >
+                  ⏮️ 重置
+                </button>
+                <button
+                  @click="rewind10"
+                  class="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-md transition-colors font-medium text-sm"
+                  title="后退10秒"
+                >
+                  ⏪ -10秒
+                </button>
+                <button
+                  @click="togglePlay"
+                  class="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md transition-colors font-medium text-base"
+                >
+                  {{ isPlaying ? '⏸️ 暂停' : '▶️ 播放' }}
+                </button>
+                <button
+                  @click="forward15"
+                  class="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-md transition-colors font-medium text-sm"
+                  title="前进15秒"
+                >
+                  ⏩ +15秒
+                </button>
+                <button
+                  @click="forward30"
+                  class="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-md transition-colors font-medium text-sm"
+                  title="前进30秒"
+                >
+                  ⏩ +30秒
+                </button>
+
+                <!-- 倍速组 -->
+                <div class="flex items-center gap-1 ml-2 border-l border-slate-600 pl-2">
+                  <button
+                    v-for="rate in PLAYBACK_RATES"
+                    :key="rate"
+                    @click="setPlaybackRate(rate)"
+                    :class="[
+                      'px-2 py-1.5 rounded-md transition-colors font-medium text-sm',
+                      playbackRate === rate
+                        ? 'bg-teal-600 text-white'
+                        : 'bg-slate-700 hover:bg-slate-600 text-slate-300'
+                    ]"
+                  >
+                    {{ rate }}x
+                  </button>
+                </div>
+              </div>
+
+              <!-- 错误提示 -->
+              <div v-if="playError" class="mt-3 bg-red-900/30 border border-red-700 rounded-lg p-3">
+                <h3 class="text-red-400 font-semibold mb-1 text-sm">⚠️ 网页播放失败</h3>
+                <p class="text-red-300 text-sm">{{ playError }}</p>
+                <p class="text-slate-400 text-sm mt-1">Chrome 只支持 MP4 (H.264) 和 WebM 格式，点击"本地播放"按钮！</p>
+              </div>
+            </div>
+
+            <!-- 控制行2: 视频管理 / 评分质量 / 文件操作 -->
+            <div class="bg-slate-800/30 px-4 py-3 border-b border-slate-700">
+              <div class="flex flex-wrap items-center gap-x-4 gap-y-3">
+                <!-- 视频管理 -->
+                <div class="flex items-center gap-2">
+                  <button
+                    @click="markTimestamp"
+                    class="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-md transition-colors font-medium text-sm"
+                    title="标记精彩时间"
+                  >
+                    ⭐ 标记
+                  </button>
+                  <button
+                    @click="generateSpriteSheet"
+                    :disabled="spriteGenerating"
+                    class="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-slate-600 disabled:cursor-not-allowed text-white rounded-md transition-colors font-medium text-sm"
+                    title="生成雪碧图"
+                  >
+                    {{ spriteGenerating ? '⏳ 生成中...' : '🗂️ 雪碧图' }}
+                  </button>
+                  <button
+                    @click="goToFrameExtract"
+                    class="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-md transition-colors font-medium text-sm"
+                    title="提取帧"
+                  >
+                    📸 提取帧
+                  </button>
+                </div>
+
+                <!-- 评分 / 质量 -->
+                <div class="flex items-center gap-3 border-l border-slate-600 pl-4">
+                  <div class="flex items-center gap-2">
+                    <span class="text-slate-400 text-sm">评分</span>
+                    <StarRating v-model="rating" :showNumber="true" />
+                  </div>
+                  <label class="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      v-model="isBadQuality"
+                      class="w-4 h-4 rounded border-slate-600 bg-slate-700 text-red-500 focus:ring-red-500 focus:ring-offset-slate-80"
+                    />
+                    <span class="text-slate-300 text-sm">🚫 无法生成雪碧图</span>
+                  </label>
+                </div>
+
+                <!-- 文件操作 -->
+                <div class="flex items-center gap-2 ml-auto">
+                  <button
+                    @click="openDirectory"
+                    class="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded-md transition-colors text-sm"
+                  >
+                    📁 文件夹
+                  </button>
+                  <button
+                    @click="openWithLocalPlayer"
+                    class="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-md transition-colors font-medium text-sm"
+                  >
+                    🎬 本地播放
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- 精彩时间点 -->
+            <div v-if="timestamps.length > 0" class="border-b border-slate-700 p-4">
+              <div class="flex items-center justify-between mb-3">
+                <h3 class="text-white font-semibold text-base">⭐ 精彩时间点</h3>
+                <span class="text-slate-400 text-sm">{{ timestamps.length }} 个</span>
+              </div>
+              <div class="flex flex-wrap gap-3">
+                <div
+                  v-for="ts in timestamps"
+                  :key="ts.id"
+                  class="group relative w-48 bg-slate-700 rounded-md overflow-hidden cursor-pointer hover:outline-2 hover:outline-purple-400 hover:outline-offset-2 hover:scale-105 transition-all duration-200 shadow-lg hover:shadow-purple-500/30"
+                  @click="jumpToTimestamp(ts.time)"
+                  @contextmenu.prevent="deleteTimestamp(ts.id)"
+                >
+                  <div class="aspect-video bg-slate-600 relative">
+                    <img
+                      v-if="ts.screenshot"
+                      :src="ts.screenshot"
+                      class="w-full h-full object-cover"
+                      alt="截图"
+                    />
+                    <div v-else class="w-full h-full flex items-center justify-center">
+                      <span class="text-2xl">🎬</span>
+                    </div>
+                    <div class="absolute bottom-1 right-1 bg-black/70 px-1.5 py-0.5 rounded text-white text-xs font-mono">
+                      {{ playHistory.formatTimestamp(ts.time) }}
+                    </div>
+                    <button
+                      @click.stop="deleteTimestamp(ts.id)"
+                      class="absolute top-1 right-1 w-6 h-6 bg-red-600/80 hover:bg-red-600 backdrop-blur-sm rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-200 text-white text-sm shadow-md hover:shadow-lg hover:scale-110"
+                      title="删除"
+                    >
+                      ×
+                    </button>
+                  </div>
+                  <div v-if="ts.label" class="p-2">
+                    <p class="text-slate-300 text-xs truncate">{{ ts.label }}</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 雪碧图 -->
+            <div v-if="video?.spritePath" class="p-4">
+              <h3 class="text-white font-semibold text-sm mb-3">🗂️ 雪碧图</h3>
+              <div class="flex gap-4 items-start">
+                <div class="flex-1 bg-slate-700 rounded-md overflow-hidden">
+                  <img
+                    :src="store.getSpriteUrl(video)"
+                    class="w-full h-auto"
+                    alt="雪碧图"
+                  />
+                </div>
+                <div class="w-64 shrink-0 space-y-2 text-sm text-slate-400">
+                  <div v-if="spriteInfo" class="flex items-center gap-1.5">
+                    <span>每 {{ spriteInfo.interval }} 秒一帧，共 {{ spriteInfo.duration }} 秒 ({{ spriteInfo.frameCount }} 帧)</span>
+                  </div>
+                  <div v-if="spriteGeneratedAt" class="flex flex-col gap-1">
+                    <span>生成于: {{ new Date(spriteGeneratedAt).toLocaleString() }}</span>
+                    <span v-if="spriteGenerateTime">
+                      (耗时 {{ (spriteGenerateTime / 1000).toFixed(1) }} 秒)
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- FFmpeg 提示 -->
+            <div v-if="ffmpegAvailable === false && !spriteGenerating" class="p-4">
+              <div class="p-3 bg-amber-900/30 border border-amber-700 rounded-md">
+                <h3 class="text-amber-400 font-semibold text-sm mb-1">⚠️ FFmpeg 未配置</h3>
+                <div class="text-amber-300 text-sm">下载 FFmpeg 并放到项目根目录</div>
+              </div>
+            </div>
           </div>
         </div>
 
-        <!-- 主要内容 - 可滚动 -->
-        <div class="flex-1 overflow-y-auto">
-          <!-- 视频信息区域 -->
-          <div class="bg-slate-800/50 border-b border-slate-700 p-4">
-            <div class="flex flex-wrap items-center gap-4 text-sm">
-              <!-- 评分 -->
-              <div class="flex items-center gap-2">
-                <span class="text-slate-400">评分</span>
-                <StarRating v-model="rating" :showNumber="true" />
-              </div>
-
-              <!-- 质量标记 -->
-              <label class="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  v-model="isBadQuality"
-                  class="w-4 h-4 rounded border-slate-600 bg-slate-700 text-red-500 focus:ring-red-500 focus:ring-offset-slate-80"
-                />
-                <span class="text-slate-300">🚫 无法生成雪碧图</span>
-              </label>
-
-              <!-- 播放统计 -->
-              <div v-if="playCount > 0" class="flex items-center gap-4">
-                <span class="text-slate-400">
-                  ▶️ 播放 <span class="text-white font-medium">{{ playCount }}</span> 次
-                </span>
-                <span v-if="totalPlayTime > 0" class="text-slate-400">
-                  ⏱️ {{ playHistory.formatPlayTime(totalPlayTime) }}
-                </span>
-              </div>
-
-              <!-- 快速操作按钮 -->
-              <div class="flex gap-2 ml-auto">
-                <button
-                  @click="openDirectory"
-                  class="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded-md transition-colors text-sm"
-                >
-                  📁 文件夹
-                </button>
-                <button
-                  @click="openWithLocalPlayer"
-                  class="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-md transition-colors font-medium text-sm"
-                >
-                  🎬 本地播放
-                </button>
-              </div>
-            </div>
-
-            <!-- 视频元信息 -->
-            <div class="mt-3 flex flex-wrap items-center gap-4 text-sm text-slate-400">
-              <div class="flex items-center gap-1.5">
-                <span class="text-slate-500">目录:</span>
-                <span class="text-slate-300">{{ video.directory }}</span>
-              </div>
-              <div v-if="video.fileSize" class="flex items-center gap-1.5">
-                <span class="text-slate-500">大小:</span>
-                <span class="text-slate-300 font-medium">{{ store.formatFileSize(video.fileSize) }}</span>
-              </div>
-              <div class="flex items-center gap-1.5">
-                <span class="text-slate-500">格式:</span>
-                <span class="text-slate-300 font-medium uppercase">{{ video.videoExtension.slice(1) }}</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- 播放器容器 -->
-          <div class="bg-black aspect-video relative">
-            <video
-              ref="videoRef"
-              class="w-full h-full object-contain"
-              playsinline
-              @error="handleVideoError"
-            />
-          </div>
-
-          <!-- 播放控制按钮 -->
-          <div v-if="video" class="bg-slate-800 px-4 py-3 border-b border-slate-700">
-            <div class="flex items-center justify-center gap-2 flex-wrap">
-              <button
-                @click="resetToStart"
-                class="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-md transition-colors font-medium text-sm"
-                title="重置到开头"
-              >
-                ⏮️ 重置
-              </button>
-              <button
-                @click="rewind10"
-                class="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-md transition-colors font-medium text-sm"
-                title="后退10秒"
-              >
-                ⏪ -10秒
-              </button>
-              <button
-                @click="togglePlay"
-                class="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md transition-colors font-medium text-base"
-              >
-                {{ isPlaying ? '⏸️ 暂停' : '▶️ 播放' }}
-              </button>
-              <button
-                @click="forward15"
-                class="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-md transition-colors font-medium text-sm"
-                title="前进15秒"
-              >
-                ⏩ +15秒
-              </button>
-              <button
-                @click="forward30"
-                class="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-md transition-colors font-medium text-sm"
-                title="前进30秒"
-              >
-                ⏩ +30秒
-              </button>
-
-              <!-- 播放速度按钮 -->
-              <div class="flex items-center gap-1 ml-2 border-l border-slate-600 pl-2">
-                <button
-                  v-for="rate in PLAYBACK_RATES"
-                  :key="rate"
-                  @click="setPlaybackRate(rate)"
-                  :class="[
-                    'px-2 py-1.5 rounded-md transition-colors font-medium text-sm',
-                    playbackRate === rate ? 'bg-teal-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-slate-300'
-                  ]"
-                >
-                  {{ rate }}x
-                </button>
-              </div>
-
-              <button
-                @click="markTimestamp"
-                class="px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-md transition-colors font-medium text-sm"
-                title="标记精彩时间"
-              >
-                ⭐ 标记
-              </button>
-              <button
-                @click="generateSpriteSheet"
-                :disabled="spriteGenerating"
-                class="px-3 py-2 bg-teal-600 hover:bg-teal-700 disabled:bg-slate-600 disabled:cursor-not-allowed text-white rounded-md transition-colors font-medium text-sm"
-                title="生成雪碧图"
-              >
-                {{ spriteGenerating ? '⏳ 生成中...' : '🗂️ 雪碧图' }}
-              </button>
-              <button
-                @click="goToFrameExtract"
-                class="px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-md transition-colors font-medium text-sm"
-                title="提取帧"
-              >
-                📸 提取帧
-              </button>
-            </div>
-
-            <!-- 错误提示 -->
-            <div v-if="playError" class="mt-3 bg-red-900/30 border border-red-700 rounded-lg p-3">
-              <h3 class="text-red-400 font-semibold mb-1 text-sm">⚠️ 网页播放失败</h3>
-              <p class="text-red-300 text-sm">{{ playError }}</p>
-              <p class="text-slate-400 text-sm mt-1">Chrome 只支持 MP4 (H.264) 和 WebM 格式，点击"本地播放"按钮！</p>
-            </div>
-          </div>
-
-          <!-- 精彩时间点 -->
-          <div v-if="timestamps.length > 0" class="border-b border-slate-700 p-4">
-            <div class="flex items-center justify-between mb-3">
-              <h3 class="text-white font-semibold text-base">⭐ 精彩时间点</h3>
-              <span class="text-slate-400 text-sm">{{ timestamps.length }} 个</span>
-            </div>
-            <div class="flex flex-wrap gap-3">
-              <div
-                v-for="ts in timestamps"
-                :key="ts.id"
-                class="group relative w-48 bg-slate-700 rounded-md overflow-hidden cursor-pointer hover:outline-2 hover:outline-purple-400 hover:outline-offset-2 hover:scale-105 transition-all duration-200 shadow-lg hover:shadow-purple-500/30"
-                @click="jumpToTimestamp(ts.time)"
-                @contextmenu.prevent="deleteTimestamp(ts.id)"
-              >
-                <!-- 截图 -->
-                <div class="aspect-video bg-slate-600 relative">
-                  <img
-                    v-if="ts.screenshot"
-                    :src="ts.screenshot"
-                    class="w-full h-full object-cover"
-                    alt="截图"
-                  />
-                  <div v-else class="w-full h-full flex items-center justify-center">
-                    <span class="text-2xl">🎬</span>
-                  </div>
-                  <!-- 时间叠加层 -->
-                  <div class="absolute bottom-1 right-1 bg-black/70 px-1.5 py-0.5 rounded text-white text-xs font-mono">
-                    {{ playHistory.formatTimestamp(ts.time) }}
-                  </div>
-                  <!-- 删除按钮 -->
-                  <button
-                    @click.stop="deleteTimestamp(ts.id)"
-                    class="absolute top-1 right-1 w-6 h-6 bg-red-600/80 hover:bg-red-600 backdrop-blur-sm rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-200 text-white text-sm shadow-md hover:shadow-lg hover:scale-110"
-                    title="删除"
-                  >
-                    ×
-                  </button>
-                </div>
-                <!-- 标签 -->
-                <div v-if="ts.label" class="p-2">
-                  <p class="text-slate-300 text-xs truncate">{{ ts.label }}</p>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- 雪碧图 -->
-          <div v-if="video?.spritePath" class="p-4">
-            <h3 class="text-white font-semibold text-sm mb-3">🗂️ 雪碧图</h3>
-            <div class="flex gap-4 items-start">
-              <div class="flex-1 bg-slate-700 rounded-md overflow-hidden">
-                <img
-                  :src="store.getSpriteUrl(video)"
-                  class="w-full h-auto"
-                  alt="雪碧图"
-                />
-              </div>
-              <div class="w-64 shrink-0 space-y-2 text-sm text-slate-400">
-                <div v-if="spriteInfo" class="flex items-center gap-1.5">
-                  <span>每 {{ spriteInfo.interval }} 秒一帧，共 {{ spriteInfo.duration }} 秒 ({{ spriteInfo.frameCount }} 帧)</span>
-                </div>
-                <div v-if="spriteGeneratedAt" class="flex flex-col gap-1">
-                  <span>生成于: {{ new Date(spriteGeneratedAt).toLocaleString() }}</span>
-                  <span v-if="spriteGenerateTime">
-                    (耗时 {{ (spriteGenerateTime / 1000).toFixed(1) }} 秒)
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- FFmpeg 提示 -->
-          <div v-if="ffmpegAvailable === false && !spriteGenerating" class="p-4">
-            <div class="p-3 bg-amber-900/30 border border-amber-700 rounded-md">
-              <h3 class="text-amber-400 font-semibold text-sm mb-1">⚠️ FFmpeg 未配置</h3>
-              <div class="text-amber-300 text-sm">
-                下载 FFmpeg 并放到项目根目录
-              </div>
-            </div>
-          </div>
+        <!-- 右侧栏：同目录视频（宽度由组件内部控制：w-72 展开 / w-10 折叠） -->
+        <div class="hidden md:block shrink-0 border-l border-slate-700">
+          <RelatedVideoList :currentVideo="video" @select="handleSelectFromSidebar" />
         </div>
       </div>
     </div>
@@ -289,6 +299,7 @@ import { usePlayHistoryStore } from '@/stores/playHistoryStore'
 import type { Video, SpriteInfo } from '@/types'
 import StarRating from '@/components/StarRating.vue'
 import AppLayout from '@/components/AppLayout.vue'
+import RelatedVideoList from '@/components/RelatedVideoList.vue'
 import Plyr from 'plyr'
 import 'plyr/dist/plyr.css'
 
@@ -314,24 +325,15 @@ const playerEventListeners = new Map<string, (...args: any[]) => void>()
 
 const PLAYBACK_RATES = [1, 1.5, 2, 3, 4] as const
 
-// 检查当前视频是否正在生成雪碧图
-const isCurrentVideoGenerating = computed(() => {
-  if (!video.value) return false
-  // 查找该视频的所有任务，取最新的一个
-  let latestStatus = null
-  for (const status of store.spriteStatusMap.values()) {
-    if (status.videoPath === video.value.videoPath) {
-      if (!latestStatus || (status.createdAt || 0) > (latestStatus.createdAt || 0)) {
-        latestStatus = status
-      }
-    }
+function formatDuration(seconds?: number): string {
+  if (!seconds || seconds <= 0) return ''
+  const hours = Math.floor(seconds / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  const secs = Math.floor(seconds % 60)
+  if (hours > 0) {
+    return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
   }
-  if (!latestStatus) return false
-  return (latestStatus.status === 'pending' || latestStatus.status === 'running') && !latestStatus.error
-})
-
-function normalizePath(p: string): string {
-  return p.replace(/\\/g, '/')
+  return `${minutes}:${secs.toString().padStart(2, '0')}`
 }
 
 // 截图辅助函数
@@ -397,7 +399,6 @@ function togglePlay() {
   if (player && video.value) {
     player.togglePlay()
   } else if (videoRef.value) {
-    // 如果 Plyr 还没初始化，直接操作 video 元素
     if (videoRef.value.paused) {
       videoRef.value.play()
     } else {
@@ -431,7 +432,6 @@ const video = computed(() => store.videos.find(v => v.id === route.params.id))
 const playCount = computed(() => video.value ? playHistory.getPlayCount(video.value.id) : 0)
 const totalPlayTime = computed(() => video.value ? playHistory.getTotalPlayTime(video.value.id) : 0)
 
-// 评分根据标记数量自动计算（只读）
 const rating = computed(() => video.value ? playHistory.getRating(video.value.id) : 0)
 
 const isBadQuality = computed({
@@ -445,7 +445,13 @@ const isBadQuality = computed({
 
 const timestamps = computed(() => video.value ? playHistory.getTimestamps(video.value.id) : [])
 
-// 雪碧图生成时间相关
+// 视频时长：优先用 video.duration，缺失时回退到 playHistory 里的历史记录
+const displayDuration = computed(() => {
+  if (!video.value) return ''
+  const d = video.value.duration ?? playHistory.getRecord(video.value.id)?.videoDuration
+  return formatDuration(d)
+})
+
 const spriteGeneratedAt = computed(() =>
   video.value ? playHistory.getSpriteGeneratedAt(video.value.id) : undefined
 )
@@ -457,31 +463,11 @@ function markTimestamp() {
   if (!player || !video.value) return
   const currentTime = player.currentTime
 
-  // 从 Plyr 实例获取真实的视频元素
   const realVideoElement = player.elements.container?.querySelector('video') || videoRef.value
   if (!realVideoElement) return
 
   const screenshot = captureScreenshot(realVideoElement, 0.8, 'image/jpeg')
-  playHistory.addTimestamp(video.value.id, currentTime, undefined, screenshot)
-}
-
-function takeScreenshot() {
-  if (!player || !video.value) return
-
-  // 从 Plyr 实例获取真实的视频元素
-  const realVideoElement = player.elements.container?.querySelector('video') || videoRef.value
-  if (!realVideoElement) return
-
-  const screenshot = captureScreenshot(realVideoElement, 1.0, 'image/png')
-  if (screenshot) {
-    // 下载截图
-    const link = document.createElement('a')
-    link.download = `${video.value.title}_screenshot_${Date.now()}.png`
-    link.href = screenshot
-    link.click()
-  } else {
-    alert('截图失败，请重试')
-  }
+  playHistory.addTimestamp(video.value.id, currentTime, undefined, screenshot ?? undefined)
 }
 
 function jumpToTimestamp(time: number) {
@@ -527,9 +513,14 @@ function goToFrameExtract() {
 }
 
 function playVideo(v: Video) {
-  playHistory.clearLastPlaybackPosition(v.id)  // 清除之前的播放位置，从头开始
+  playHistory.clearLastPlaybackPosition(v.id)
   store.addToRecent(v.id)
   router.push({ name: 'video', params: { id: v.id } })
+}
+
+// 侧栏点击：复用 playVideo
+function handleSelectFromSidebar(v: Video) {
+  playVideo(v)
 }
 
 function handleVideoError(event: Event) {
@@ -581,7 +572,6 @@ function getVttUrl(vttPath: string): string {
   return `/api/image?path=${encodeURIComponent(vttPath)}`
 }
 
-// 保存当前播放位置
 function saveCurrentPosition() {
   if (!player || !video.value) return
   const currentTime = player.currentTime
@@ -590,7 +580,6 @@ function saveCurrentPosition() {
   }
 }
 
-// 清理之前的 VTT Blob URL
 function cleanupVttBlobUrl() {
   if (currentVttBlobUrl) {
     URL.revokeObjectURL(currentVttBlobUrl)
@@ -598,10 +587,8 @@ function cleanupVttBlobUrl() {
   }
 }
 
-// 清理雪碧图引用
 function cleanupSpriteImage() {
   if (spriteImage.value) {
-    // 移除图像所有引用，帮助 GC
     spriteImage.value.src = ''
     spriteImage.value.onload = null
     spriteImage.value.onerror = null
@@ -609,20 +596,21 @@ function cleanupSpriteImage() {
   }
 }
 
-// 清理 Plyr 播放器和所有事件监听器
 function cleanupPlayer() {
   if (player) {
-    // 移除所有保存的事件监听器
     for (const [event, handler] of playerEventListeners) {
       try {
-        player.off(event, handler)
+        // Plyr 的 off 期望具体的事件名字面量类型，这里用 unknown 绕过
+        ;(player.off as unknown as (e: string, h: (...args: unknown[]) => void) => void)(
+          event,
+          handler as (...args: unknown[]) => void
+        )
       } catch (e) {
         // 忽略移除监听器时的错误
       }
     }
     playerEventListeners.clear()
 
-    // 销毁播放器
     try {
       player.destroy()
     } catch (e) {
@@ -632,13 +620,10 @@ function cleanupPlayer() {
   }
 }
 
-// 动态加载并修改 VTT 文件，使雪碧图路径正确
 async function getVttBlobUrl(vttPath: string, spritePath: string): Promise<string | null> {
-  // 先清理旧的
   cleanupVttBlobUrl()
 
   try {
-    // 加载 VTT 文件内容
     const response = await fetch(getVttUrl(vttPath))
     if (!response.ok) {
       console.error('VTT 文件加载失败:', response.status)
@@ -648,26 +633,15 @@ async function getVttBlobUrl(vttPath: string, spritePath: string): Promise<strin
     let vttContent = await response.text()
     const spriteFileName = spritePath.split(/[\\/]/).pop()
 
-    console.log('原始 VTT 内容:', vttContent.substring(0, 300) + '...')
-    console.log('雪碧图文件名:', spriteFileName)
-
-    // 替换 VTT 中的雪碧图文件名为完整的 API URL
     if (spriteFileName) {
       const spriteUrl = store.getSpriteUrl({ spritePath } as unknown as Video)
-      console.log('雪碧图 URL:', spriteUrl)
-      // 替换所有 "filename#xywh=" 为 "完整URL#xywh="
-      // 使用字符串替换而不是正则表达式，避免特殊字符问题
       const searchStr = `${spriteFileName}#xywh=`
       const replaceStr = `${spriteUrl}#xywh=`
       vttContent = vttContent.split(searchStr).join(replaceStr)
     }
 
-    console.log('修改后的 VTT 内容:', vttContent.substring(0, 300) + '...')
-
-    // 创建 Blob URL
     const blob = new Blob([vttContent], { type: 'text/vtt' })
     currentVttBlobUrl = URL.createObjectURL(blob)
-    console.log('创建的 VTT Blob URL:', currentVttBlobUrl)
     return currentVttBlobUrl
   } catch (err) {
     console.error('处理 VTT 文件失败:', err)
@@ -680,14 +654,11 @@ async function loadPlayer() {
 
   playError.value = null
 
-  // 如果有 VTT，先处理它
   let vttBlobUrl: string | null = null
   if (video.value.spriteVttPath && video.value.spritePath) {
     vttBlobUrl = await getVttBlobUrl(video.value.spriteVttPath, video.value.spritePath)
-    console.log('VTT Blob URL:', vttBlobUrl)
   }
 
-  // 构建 Plyr 配置
   const plyrConfig: Plyr.Options = {
     autoplay: false,
     controls: [
@@ -707,7 +678,6 @@ async function loadPlayer() {
     seekTime: 10,
   }
 
-  // 只有在有 VTT 时才添加预览缩略图配置
   if (vttBlobUrl) {
     plyrConfig.previewThumbnails = {
       enabled: true,
@@ -733,7 +703,6 @@ async function loadPlayer() {
       }
     }
     player.source = sourceConfig
-    // 恢复播放速度
     player.speed = playbackRate.value
   } else {
     if (videoRef.value) {
@@ -746,14 +715,11 @@ async function loadPlayer() {
 
     player = new Plyr(videoRef.value, plyrConfig)
 
-    // 定义并保存每个事件监听器的引用
-
     const playHandler = () => {
       isPlaying = true
       if (video.value) {
         playHistory.startSession(video.value.id)
       }
-      // 开始定期保存播放位置（每5秒）
       if (savePositionTimer) {
         clearInterval(savePositionTimer)
       }
@@ -765,7 +731,6 @@ async function loadPlayer() {
     const pauseHandler = () => {
       isPlaying = false
       playHistory.pauseSession()
-      // 暂停时立即保存播放位置
       saveCurrentPosition()
       if (savePositionTimer) {
         clearInterval(savePositionTimer)
@@ -778,7 +743,6 @@ async function loadPlayer() {
     const endedHandler = () => {
       isPlaying = false
       playHistory.pauseSession()
-      // 播放结束时保存位置
       saveCurrentPosition()
       if (savePositionTimer) {
         clearInterval(savePositionTimer)
@@ -788,52 +752,45 @@ async function loadPlayer() {
     playerEventListeners.set('ended', endedHandler)
     player.on('ended', endedHandler)
 
-    const errorHandler = (event: any) => {
-      console.error('Plyr 播放错误:', event)
+    const errorHandler = (..._args: unknown[]) => {
+      console.error('Plyr 播放错误')
       playError.value = '视频播放失败，请检查视频格式'
     }
     playerEventListeners.set('error', errorHandler)
     player.on('error', errorHandler)
 
-    // 监听视频元数据加载完成，保存视频时长并恢复播放位置
     const loadedmetadataHandler = () => {
       if (video.value && player) {
         const duration = player.duration
         if (duration && duration > 0) {
           playHistory.setVideoDuration(video.value.id, duration)
         }
-        // 恢复上次播放位置（如果存在）
         const lastPosition = playHistory.getLastPlaybackPosition(video.value.id)
         if (lastPosition && lastPosition > 0 && lastPosition < duration) {
           player.currentTime = lastPosition
         }
-        // 恢复播放速度
         player.speed = playbackRate.value
       }
     }
     playerEventListeners.set('loadedmetadata', loadedmetadataHandler)
     player.on('loadedmetadata', loadedmetadataHandler)
 
-    // 监听播放器 ready 事件，也尝试获取时长和恢复播放位置
     const readyHandler = () => {
       if (video.value && player) {
         const duration = player.duration
         if (duration && duration > 0) {
           playHistory.setVideoDuration(video.value.id, duration)
         }
-        // 恢复上次播放位置（如果存在）
         const lastPosition = playHistory.getLastPlaybackPosition(video.value.id)
         if (lastPosition && lastPosition > 0) {
           player.currentTime = lastPosition
         }
-        // 恢复播放速度
         player.speed = playbackRate.value
       }
     }
     playerEventListeners.set('ready', readyHandler)
     player.on('ready', readyHandler)
 
-    // 监听播放速度变化
     const ratechangeHandler = () => {
       if (player) {
         playbackRate.value = player.speed
@@ -844,7 +801,6 @@ async function loadPlayer() {
   }
 }
 
-// 加载雪碧图信息和图片
 async function loadSprite() {
   if (!video.value?.spritePath) {
     spriteInfo.value = null
@@ -853,11 +809,9 @@ async function loadSprite() {
     return
   }
 
-  // 加载雪碧图信息
   const info = await store.getSpriteInfo(video.value.spritePath)
   spriteInfo.value = info
 
-  // 预加载雪碧图
   if (info) {
     const img = new Image()
     img.crossOrigin = 'anonymous'
@@ -872,14 +826,12 @@ async function loadSprite() {
   }
 }
 
-// 检查 FFmpeg 状态
 async function checkFFmpeg() {
   const status = await store.checkFFmpegStatus()
   ffmpegAvailable.value = status.available
   return status
 }
 
-// 生成雪碧图
 async function generateSpriteSheet() {
   if (!video.value) return
 
@@ -889,7 +841,6 @@ async function generateSpriteSheet() {
     return
   }
 
-  // 检查是否已存在雪碧图
   const hasSprite = !!video.value.spritePath
   let force = false
 
@@ -913,15 +864,11 @@ async function generateSpriteSheet() {
     spriteGenerating.value = false
     return
   }
-
-  // 状态将通过 WebSocket 自动更新
 }
 
-// 监听 store 中的雪碧图状态变化
 function watchSpriteStatus() {
   if (!video.value) return
 
-  // 查找该视频的所有任务，取最新的一个
   let latestStatus = null
   for (const s of store.spriteStatusMap.values()) {
     if (s.videoPath === video.value.videoPath) {
@@ -932,50 +879,38 @@ function watchSpriteStatus() {
   }
 
   if (!latestStatus) {
-    // 没有任务，确保按钮可点击
     spriteGenerating.value = false
     return
   }
 
   if (latestStatus.status === 'completed' && !latestStatus.error) {
-    // 完成：清除生成状态
     spriteGenerating.value = false
   } else if (latestStatus.status === 'error' || latestStatus.error) {
-    // 出错
     spriteGenerating.value = false
     alert('雪碧图生成失败: ' + (latestStatus.errorMessage || '未知错误'))
   } else if (latestStatus.status === 'aborted') {
-    // 任务被中止
     spriteGenerating.value = false
   } else if ((latestStatus.status === 'pending' || latestStatus.status === 'running') && !latestStatus.error) {
-    // 还在生成中
     spriteGenerating.value = true
   } else {
-    // 其他状态，确保按钮可点击
     spriteGenerating.value = false
   }
 }
 
 onMounted(async () => {
-  // 检查 FFmpeg 状态
   await checkFFmpeg()
-
   playHistory.resetPlayCountMarker()
   window.addEventListener('keydown', handleKeyDown)
 })
 
-// 当视频信息加载完成后，加载雪碧图和播放器
 watch(video, async (newVideo, oldVideo) => {
   if (newVideo) {
-    // 如果雪碧图路径从无到有，或者发生了变化，重新加载雪碧图
     const spritePathChanged = newVideo.spritePath !== oldVideo?.spritePath
     if (spritePathChanged || !oldVideo) {
       await loadSprite()
     }
 
-    // 初始化播放器（如果还没初始化）
     if (!player || oldVideo?.id !== newVideo.id) {
-      // 尝试立即初始化，如果失败则重试几次
       let attempts = 0
       const tryLoadPlayer = () => {
         if (videoRef.value && video.value) {
@@ -990,7 +925,6 @@ watch(video, async (newVideo, oldVideo) => {
   }
 }, { immediate: true })
 
-// 监听雪碧图状态变化
 watch([
   () => store.spriteInProgress,
   () => store.spriteStatusMap
@@ -999,17 +933,14 @@ watch([
 }, { deep: true })
 
 watch(() => route.params.id, async (_newId, oldId) => {
-  // 切换视频前保存当前视频的播放位置
   if (oldId && player) {
     const currentTime = player.currentTime
     if (currentTime && currentTime > 0) {
-      // 直接用 oldId 保存，不要用 saveCurrentPosition()，因为 video.value 已经变了
-      playHistory.setLastPlaybackPosition(oldId as string, currentTime)
+      playHistory.setLastPlaybackPosition(oldId as unknown as string, currentTime)
     }
   }
   playHistory.stopSession()
   playHistory.resetPlayCountMarker()
-  // 重置播放速度
   playbackRate.value = 1
 
   setTimeout(() => {
@@ -1019,21 +950,15 @@ watch(() => route.params.id, async (_newId, oldId) => {
 
 onBeforeUnmount(() => {
   playHistory.stopSession()
-  // 离开页面时保存最后播放位置
   saveCurrentPosition()
   window.removeEventListener('keydown', handleKeyDown)
-  // 清理保存位置定时器
   if (savePositionTimer) {
     clearInterval(savePositionTimer)
     savePositionTimer = null
   }
-  // 清理 VTT Blob URL
   cleanupVttBlobUrl()
-  // 清理雪碧图引用
   cleanupSpriteImage()
-  // 重置进度状态
   spriteGenerating.value = false
-  // 清理 Plyr 播放器和所有事件监听器
   cleanupPlayer()
 })
 </script>
@@ -1073,4 +998,3 @@ onBeforeUnmount(() => {
   background: #64748b;
 }
 </style>
-
