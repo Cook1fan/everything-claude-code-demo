@@ -13,6 +13,13 @@ export interface Video {
   duration?: number; // 视频总时长（秒）
   createdAt: number;
   updatedAt: number;
+  tags?: string[]; // 从标题提取的标签
+}
+
+// 标签接口
+export interface Tag {
+  name: string;
+  count: number;
 }
 
 export interface DirectoryTreeNode {
@@ -30,6 +37,7 @@ export interface VideoData {
   directories: string[];
   directoryTree: DirectoryTreeNode[];
   videos: Video[];
+  tags?: Tag[]; // 全局标签列表及计数
 }
 
 export interface ScanStatus {

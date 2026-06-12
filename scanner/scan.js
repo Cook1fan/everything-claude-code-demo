@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const config = require('./config');
+const { extractTags, buildTagCounts } = require('./tags');
 
 // 确保数据目录存在
 function ensureDataDir() {
@@ -249,9 +250,10 @@ function scanDirectoryRecursive(dirPath, hardDrive, dirCache, results) {
       }
     }
 
+    const videoTitle = getTitleFromPath(videoPath, videoCountInDir);
     const video = {
       id: generateId(videoPath),
-      title: getTitleFromPath(videoPath, videoCountInDir),
+      title: videoTitle,
       directory: normalizedDirPath,
       hardDrive: hardDrive,
       videoPath: normalizePath(videoPath),
@@ -263,6 +265,7 @@ function scanDirectoryRecursive(dirPath, hardDrive, dirCache, results) {
       fileSize: videoStat.size,
       createdAt: videoStat.birthtimeMs,
       updatedAt: videoStat.mtimeMs,
+      tags: extractTags(videoTitle), // 从标题提取标签
     };
 
     results.videos.push(video);
@@ -381,12 +384,13 @@ function scan() {
   globalPerf.step('ensureDataDir');
 
   const results = {
-    version: '2.0.0',
+    version: '2.0.1', // 版本升级以支持标签
     generatedAt: Date.now(),
     hardDrives: config.hardDrives.filter(hd => fs.existsSync(hd)),
     directories: [],
     directoryTree: [],
     videos: [],
+    tags: [], // 将在扫描完成后填充
   };
 
   const dirCache = new DirCache();
@@ -421,6 +425,13 @@ function scan() {
   console.log(`  排序完成, 耗时 ${Date.now() - sortStart}ms`);
   globalPerf.step('sort_videos');
 
+  console.log('\n---------- 生成标签统计 ----------');
+  const tagStart = Date.now();
+  results.tags = buildTagCounts(results.videos);
+  console.log(`  生成 ${results.tags.length} 个标签`);
+  console.log(`  耗时 ${Date.now() - tagStart}ms`);
+  globalPerf.step('build_tag_counts');
+
   console.log('\n---------- 写入文件 ----------');
   const writeStart = Date.now();
   console.log(`  写入路径: ${config.outputPath}`);
@@ -434,6 +445,7 @@ function scan() {
   console.log(`扫描完成!`);
   console.log(`结束时间: ${new Date().toLocaleString()}`);
   console.log(`- 找到 ${results.videos.length} 个视频`);
+  console.log(`- 提取 ${results.tags.length} 个标签`);
   console.log(`- 扫描 ${dirScanCount} 个目录`);
   console.log(`- 涉及 ${results.directories.length} 个有视频的目录`);
   console.log(`- 目录缓存: ${dirCache.dirInfo.size} 个目录`);

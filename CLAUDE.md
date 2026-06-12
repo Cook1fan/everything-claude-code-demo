@@ -131,6 +131,27 @@ WebSocket: ws://localhost:3000 - 实时状态更新
 - 调整视频/海报扩展名
 - 配置 FFmpeg 雪碧图/帧提取参数
 
+### 视频标签系统
+
+从视频标题自动提取标签，支持多标签筛选：
+
+**首次设置**：
+```bash
+cp scanner/config.local.example.js scanner/config.local.js
+# 编辑 config.local.js 中的 TAGS 数组，自定义标签列表
+npm run scan  # 重新扫描以提取标签
+```
+
+**标签筛选**：
+- 在首页侧边栏显示可用标签及其出现次数
+- 支持"或"（OR）和"且"（AND）两种筛选模式
+- 标签选择保存在本地 IndexedDB
+
+**相关文件**：
+- `scanner/tags.js` - 标签提取逻辑
+- `scanner/config.local.js` - 本地标签配置（不提交到 Git）
+- `frontend/src/components/TagFilter.vue` - 标签筛选 UI
+
 ### 重要功能
 
 - **雪碧图缩略图**: 通过 FFmpeg 生成，使用 WebVTT 显示为悬停预览

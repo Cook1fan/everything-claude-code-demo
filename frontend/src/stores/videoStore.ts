@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { Video, VideoData, ScanStatus, DirectoryTreeNode, SpriteInfo, SpriteStatus, BatchSpriteStats, FrameExtractStatus } from '@/types'
+import type { Video, VideoData, ScanStatus, DirectoryTreeNode, SpriteInfo, SpriteStatus, BatchSpriteStats, FrameExtractStatus, Tag } from '@/types'
 import * as indexedDB from '@/utils/indexedDB'
 import { usePlayHistoryStore } from './playHistoryStore'
 
@@ -29,6 +29,11 @@ export const useVideoStore = defineStore('video', () => {
   const currentPage = ref(1)
   const pageSize = 100
   const isInitialized = ref(false)
+
+  // 标签筛选相关
+  const availableTags = ref<Tag[]>([])
+  const selectedTags = ref<string[]>([])
+  const tagFilterMode = ref<'AND' | 'OR'>('OR')
 
   // 雪碧图生成状态 - 支持多个同时生成
   const spriteInProgressSet = ref<Set<string>>(new Set())
@@ -259,6 +264,8 @@ export const useVideoStore = defineStore('video', () => {
       selectedDirectory.value = state.selectedDirectory || ''
       searchQuery.value = state.searchQuery || ''
       currentPage.value = state.currentPage || 1
+      selectedTags.value = state.selectedTags || []
+      tagFilterMode.value = (state.tagFilterMode as 'AND' | 'OR') || 'OR'
     } catch (err) {
       console.error('加载应用状态失败:', err)
     }
@@ -274,6 +281,8 @@ export const useVideoStore = defineStore('video', () => {
         selectedDirectory: selectedDirectory.value,
         searchQuery: searchQuery.value,
         currentPage: currentPage.value,
+        selectedTags: selectedTags.value,
+        tagFilterMode: tagFilterMode.value,
       })
     } catch (err) {
       console.error('保存应用状态失败:', err)
@@ -429,6 +438,21 @@ export const useVideoStore = defineStore('video', () => {
       )
     }
 
+    // 标签筛选
+    if (selectedTags.value.length > 0) {
+      if (tagFilterMode.value === 'AND') {
+        // AND 模式：视频必须包含所有选中的标签
+        result = result.filter(v =>
+          selectedTags.value.every(tag => v.tags?.includes(tag))
+        )
+      } else {
+        // OR 模式：视频包含任一选中标签即可
+        result = result.filter(v =>
+          selectedTags.value.some(tag => v.tags?.includes(tag))
+        )
+      }
+    }
+
     switch (sortMode.value) {
       case 'random':
         result = shuffleArray(result, randomSeed.value)
@@ -523,6 +547,34 @@ export const useVideoStore = defineStore('video', () => {
     currentPage.value = 1
   }
 
+  // 标签筛选操作
+  function toggleTag(tagName: string) {
+    const index = selectedTags.value.indexOf(tagName)
+    if (index === -1) {
+      selectedTags.value.push(tagName)
+    } else {
+      selectedTags.value.splice(index, 1)
+    }
+    currentPage.value = 1
+    saveStateToDB()
+  }
+
+  function clearTags() {
+    selectedTags.value = []
+    currentPage.value = 1
+    saveStateToDB()
+  }
+
+  function setTagFilterMode(mode: 'AND' | 'OR') {
+    tagFilterMode.value = mode
+    currentPage.value = 1
+    saveStateToDB()
+  }
+
+  function isTagSelected(tagName: string) {
+    return selectedTags.value.includes(tagName)
+  }
+
   async function loadVideos() {
     loading.value = true
     try {
@@ -532,6 +584,7 @@ export const useVideoStore = defineStore('video', () => {
       hardDrives.value = Array.isArray(data.hardDrives) ? data.hardDrives : []
       directories.value = Array.isArray(data.directories) ? data.directories : []
       directoryTree.value = Array.isArray(data.directoryTree) ? data.directoryTree : []
+      availableTags.value = Array.isArray(data.tags) ? data.tags : []
     } catch (err) {
       console.error('加载视频失败:', err)
       // 出错时设置为空数组
@@ -539,6 +592,7 @@ export const useVideoStore = defineStore('video', () => {
       hardDrives.value = []
       directories.value = []
       directoryTree.value = []
+      availableTags.value = []
     } finally {
       loading.value = false
     }
@@ -768,6 +822,10 @@ export const useVideoStore = defineStore('video', () => {
     spriteStatusMap,
     batchSpriteInProgress,
     batchSpriteStats,
+    // 标签相关
+    availableTags,
+    selectedTags,
+    tagFilterMode,
     initialize,
     toggleNode,
     isExpanded,
@@ -775,6 +833,10 @@ export const useVideoStore = defineStore('video', () => {
     selectDirectory,
     setSortMode,
     reshuffle,
+    toggleTag,
+    clearTags,
+    setTagFilterMode,
+    isTagSelected,
     goToPage,
     nextPage,
     prevPage,

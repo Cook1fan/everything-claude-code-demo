@@ -26,6 +26,7 @@ data/*.json
 
 # Config (contains local paths)
 scanner/config.js
+scanner/config.local.js
 
 # Logs
 *.log

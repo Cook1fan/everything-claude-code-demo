@@ -39,6 +39,9 @@
             </button>
           </div>
 
+          <!-- 标签筛选 -->
+          <TagFilter v-if="store.availableTags.length > 0" />
+
           <!-- 目录树 -->
           <div class="flex-1 overflow-y-auto">
             <h3 class="text-xs font-semibold text-slate-500 mb-2 uppercase tracking-wider">目录</h3>
@@ -254,6 +257,7 @@ import VideoCard from '@/components/VideoCard.vue'
 import DirectoryTree from '@/components/DirectoryTree.vue'
 import AppLayout from '@/components/AppLayout.vue'
 import DeleteConfirmDialog from '@/components/DeleteConfirmDialog.vue'
+import TagFilter from '@/components/TagFilter.vue'
 import type { Video } from '@/types'
 
 type SortMode = StoreSortMode | 'rating'
