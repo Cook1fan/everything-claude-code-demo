@@ -187,9 +187,9 @@
           </div>
         </div>
 
-        <div v-else class="flex-1 flex flex-col">
+        <div v-else class="flex-1 min-h-0 flex flex-col">
           <!-- 视频网格 -->
-          <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+          <div class="flex-1 min-h-0 overflow-y-auto grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 content-start">
             <VideoCard
               v-for="video in prioritizedPagedVideos"
               :key="video.id"
