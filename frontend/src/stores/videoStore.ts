@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { Video, VideoData, ScanStatus, DirectoryTreeNode, SpriteInfo, SpriteStatus, BatchSpriteStats, FrameExtractStatus, Tag } from '@/types'
+import type { Video, VideoData, ScanStatus, DirectoryTreeNode, SpriteInfo, SpriteStatus, BatchSpriteStats, FrameExtractStatus, Tag, DeletionRecordsResponse } from '@/types'
 import * as indexedDB from '@/utils/indexedDB'
 import { usePlayHistoryStore } from './playHistoryStore'
 
@@ -575,6 +575,22 @@ export const useVideoStore = defineStore('video', () => {
     return selectedTags.value.includes(tagName)
   }
 
+  async function loadDeletionRecords(dirPath: string): Promise<DeletionRecordsResponse> {
+    try {
+      const res = await fetch(
+        `${API_BASE}/deletion-records?path=${encodeURIComponent(dirPath)}`
+      )
+      if (!res.ok) {
+        // 404 (目录不存在) 或其他错误,统一不显示
+        return { exists: false, records: [] }
+      }
+      return await res.json()
+    } catch (err) {
+      console.error('加载删除记录失败:', err)
+      return { exists: false, records: [] }
+    }
+  }
+
   async function loadVideos() {
     loading.value = true
     try {
@@ -841,6 +857,7 @@ export const useVideoStore = defineStore('video', () => {
     nextPage,
     prevPage,
     loadVideos,
+    loadDeletionRecords,
     getScanStatus,
     startScan,
     getVideoUrl,
