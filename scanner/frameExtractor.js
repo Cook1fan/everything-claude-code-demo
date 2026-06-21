@@ -577,7 +577,7 @@ process.on('SIGINT', () => {
   cleanupAllTempDirs();
   process.exit(0);
 });
-process.on('SIGTER', () => {
+process.on('SIGTERM', () => {
   cleanupAllTempDirs();
   process.exit(0);
 });
@@ -588,7 +588,7 @@ process.on('uncaughtException', (err) => {
 });
 
 // Start periodic stale process cleanup
-if (process.env.NODE_ENV !== 'test') {
+if (process.env.NODE_ENV !== 'test' && require.main === module) {
   staleProcessCheckInterval = setInterval(cleanupStaleProcesses, 5 * 60 * 1000);
 }
 

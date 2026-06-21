@@ -388,8 +388,9 @@ function createSprite(ffmpegPath, framePaths, outputPath, columns, thumbnailWidt
     ];
 
     execFile(ffmpegPath, args, (error) => {
+      // 不管成功失败都清理中间清单文件
       if (fs.existsSync(listFile)) {
-        fs.unlinkSync(listFile);
+        try { fs.unlinkSync(listFile); } catch (e) { /* 忽略 */ }
       }
 
       if (error) {
@@ -668,7 +669,8 @@ process.on('uncaughtException', (err) => {
 });
 
 // 启动定期清理超时进程（每5分钟检查一次）
-if (process.env.NODE_ENV !== 'test') {
+// 仅在主进程运行；worker 进程跑这个 timer 既无用又会阻止退出
+if (process.env.NODE_ENV !== 'test' && require.main === module) {
   staleProcessCheckInterval = setInterval(cleanupStaleProcesses, 5 * 60 * 1000);
 }
 
@@ -687,5 +689,6 @@ module.exports = {
   generateSprite,
   getVideoDuration,
   createVttFromJson,
-  abortSpriteGeneration
+  abortSpriteGeneration,
+  cleanup
 };

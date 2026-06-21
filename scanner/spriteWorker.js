@@ -16,6 +16,8 @@ function onProgress(status) {
 }
 
 // 执行雪碧图生成
+const { cleanup } = require('./spriteGenerator');
+
 generateSprite(videoPath, options, onProgress)
   .then(result => {
     console.log('[Worker] 处理完成:', path.basename(videoPath));
@@ -34,4 +36,9 @@ generateSprite(videoPath, options, onProgress)
       success: false,
       error: error.message
     });
+  })
+  .finally(() => {
+    // 显式释放 timer 并退出进程，避免 Worker 残留
+    cleanup();
+    process.exit(0);
   });
