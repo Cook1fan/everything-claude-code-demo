@@ -162,12 +162,12 @@ router.post('/make', async (req, res) => {
       res.setHeader('X-Actual-Duration', String(actualDuration));
       res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
 
-      const stream = fs.createReadStream(gifPath);
-      stream.on('error', () => {
+      try {
+        const buffer = fs.readFileSync(gifPath);
+        res.end(buffer);
+      } catch (readErr) {
         if (!res.headersSent) res.status(500).end();
-        cleanupTempDir(tempDir);
-      });
-      stream.pipe(res);
+      }
     });
   });
 });
