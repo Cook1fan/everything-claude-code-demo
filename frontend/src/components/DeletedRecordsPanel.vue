@@ -2,33 +2,25 @@
   <div
     v-if="visible"
     data-test="deletion-panel"
-    style="margin-bottom: 16px; min-height: 60px; flex-shrink: 0; background-color: rgba(245, 158, 11, 0.2); border: 3px solid #f59e0b; border-radius: 8px; box-shadow: 0 10px 15px -3px rgba(245, 158, 11, 0.3); position: sticky; top: 0; z-index: 10;"
+    class="mx-6 mt-4"
   >
     <!-- 可折叠头部 -->
     <button
       type="button"
       data-test="panel-toggle"
+      class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 transition-colors"
       @click="toggleExpand"
       :aria-expanded="expanded"
       aria-controls="deletion-records-list"
-      style="display: flex; align-items: center; gap: 8px; width: 100%; padding: 16px; background-color: transparent; border: none; cursor: pointer; color: #fef3c7; font-size: 18px; font-weight: 600; text-align: left;"
     >
       <span
         aria-hidden="true"
-        :style="{
-          display: 'inline-block',
-          color: '#fcd34d',
-          fontSize: '20px',
-          fontWeight: 'bold',
-          transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
-          transition: 'transform 0.2s'
-        }"
+        class="inline-block text-[10px] transition-transform"
+        :class="{ 'rotate-90': expanded }"
       >▶</span>
-      <span aria-hidden="true" style="font-size: 24px;">📋</span>
-      <span data-test="panel-count" style="color: #fef3c7; font-size: 18px; font-weight: 600;">
-        {{ records.length }} 条删除记录
+      <span data-test="panel-count" class="text-slate-500">
+        {{ records.length }} 条已删除视频记录
       </span>
-      <span style="margin-left: auto; color: #fcd34d; font-size: 13px; opacity: 0.7;">点击展开 ▼</span>
     </button>
 
     <!-- 展开内容 -->
@@ -36,17 +28,17 @@
       v-if="expanded"
       id="deletion-records-list"
       data-test="records-list"
-      style="border-top: 2px solid #f59e0b; background-color: rgba(15, 23, 42, 0.7); padding: 12px 16px; max-height: 256px; overflow-y: auto; list-style: none; margin: 0;"
+      class="mt-1 max-h-48 overflow-y-auto text-xs text-slate-500 space-y-0.5 pl-5"
     >
       <li
         v-for="(record, idx) in records"
         :key="idx"
-        style="padding: 8px 0; font-size: 14px; display: flex; align-items: baseline; gap: 12px; border-bottom: 1px solid rgba(245, 158, 11, 0.2);"
+        class="flex items-baseline gap-2 leading-relaxed"
       >
-        <span style="color: #fcd34d; font-family: monospace; font-size: 12px; white-space: nowrap; font-weight: 600;">
-          {{ record.timestamp }}
+        <span class="text-slate-600 font-mono text-[10px] shrink-0">
+          {{ formatTimestamp(record.timestamp) }}
         </span>
-        <span style="color: #e2e8f0; word-break: break-all;">
+        <span class="text-slate-400 break-all">
           {{ record.path }}
         </span>
       </li>
@@ -73,6 +65,13 @@ function toggleExpand() {
   expanded.value = !expanded.value
 }
 
+function formatTimestamp(ts: string): string {
+  // 形如 "2026-06-18T07:37:52.998Z" → "06-18 07:37"
+  const m = ts.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/)
+  if (!m) return ts
+  return `${m[2]}-${m[3]} ${m[4]}:${m[5]}`
+}
+
 let requestSeq = 0
 watch(
   () => props.directoryPath,
@@ -83,28 +82,16 @@ watch(
     visible.value = false
     expanded.value = false
 
-    console.log('[DeletedRecordsPanel] watch fired, newPath:', newPath, 'seq:', seq)
-
-    if (!newPath) {
-      console.log('[DeletedRecordsPanel] newPath empty, skip')
-      return
-    }
+    if (!newPath) return
 
     // 异步加载进行中；新请求会通过 seq 检查丢弃过期响应
     const result = await store.loadDeletionRecords(newPath)
-    console.log('[DeletedRecordsPanel] API result:', JSON.stringify(result), 'seq check:', seq === requestSeq)
 
-    if (seq !== requestSeq) {
-      console.log('[DeletedRecordsPanel] seq mismatch, skip')
-      return  // newer request superseded us
-    }
+    if (seq !== requestSeq) return // newer request superseded us
 
     if (result.exists && result.records.length > 0) {
       records.value = result.records
       visible.value = true
-      console.log('[DeletedRecordsPanel] set visible=true, records:', records.value.length)
-    } else {
-      console.log('[DeletedRecordsPanel] condition not met:', { exists: result.exists, length: result.records?.length })
     }
   },
   { immediate: true }
