@@ -6,15 +6,18 @@
     <!-- 可折叠头部 -->
     <button
       @click="toggleExpand"
+      :aria-expanded="expanded"
+      aria-controls="deletion-records-list"
       class="w-full px-4 py-3 flex items-center gap-2 hover:bg-amber-900/30 transition-colors"
     >
       <span
+        aria-hidden="true"
         :class="[
           'inline-block text-xs text-amber-400 transition-transform',
           expanded ? 'rotate-90' : ''
         ]"
       >▶</span>
-      <span class="text-base">📋</span>
+      <span aria-hidden="true" class="text-base">📋</span>
       <span class="text-amber-200 font-medium text-sm">
         {{ records.length }} 条删除记录
       </span>
@@ -23,6 +26,7 @@
     <!-- 展开内容 -->
     <ul
       v-if="expanded"
+      id="deletion-records-list"
       class="border-t border-amber-700/50 px-4 py-2 max-h-64 overflow-y-auto"
     >
       <li
@@ -55,15 +59,16 @@ const store = useVideoStore()
 const records = ref<DeletionRecord[]>([])
 const expanded = ref(false)
 const visible = ref(false)
-const loading = ref(false)
 
 function toggleExpand() {
   expanded.value = !expanded.value
 }
 
+let requestSeq = 0
 watch(
   () => props.directoryPath,
   async (newPath) => {
+    const seq = ++requestSeq
     // 重置状态
     records.value = []
     visible.value = false
@@ -71,9 +76,9 @@ watch(
 
     if (!newPath) return
 
-    loading.value = true
+    // 异步加载进行中；新请求会通过 seq 检查丢弃过期响应
     const result = await store.loadDeletionRecords(newPath)
-    loading.value = false
+    if (seq !== requestSeq) return  // newer request superseded us
 
     if (result.exists && result.records.length > 0) {
       records.value = result.records
