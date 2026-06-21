@@ -2,7 +2,7 @@
   <div
     v-if="visible"
     data-test="deletion-panel"
-    class="mx-6 mt-4 mb-2"
+    class="my-4"
   >
     <div
       class="rounded-md border border-amber-500/40 bg-amber-500/10 overflow-hidden"
