@@ -157,6 +157,12 @@
           </div>
         </div>
 
+        <!-- 删除记录面板 -->
+        <DeletedRecordsPanel
+          v-if="store.selectedDirectory"
+          :directory-path="store.selectedDirectory"
+        />
+
         <div v-if="store.loading" class="flex-1 flex items-center justify-center">
           <div class="text-center">
             <div class="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
@@ -258,6 +264,7 @@ import DirectoryTree from '@/components/DirectoryTree.vue'
 import AppLayout from '@/components/AppLayout.vue'
 import DeleteConfirmDialog from '@/components/DeleteConfirmDialog.vue'
 import TagFilter from '@/components/TagFilter.vue'
+import DeletedRecordsPanel from '@/components/DeletedRecordsPanel.vue'
 import type { Video } from '@/types'
 
 type SortMode = StoreSortMode | 'rating'
