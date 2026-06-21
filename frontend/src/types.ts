@@ -181,3 +181,14 @@ export interface FrameExtractListResponse {
   inProgress: boolean;
   tasks: FrameExtractStatus[];
 }
+
+// 删除记录接口
+export interface DeletionRecord {
+  timestamp: string;   // ISO 格式,如 "2025-12-18T14:30:25.000Z"
+  path: string;        // 被删除的目录完整路径
+}
+
+export interface DeletionRecordsResponse {
+  exists: boolean;            // 文件是否存在
+  records: DeletionRecord[];  // 按时间戳降序排列(仅当 exists 为 true 时)
+}
