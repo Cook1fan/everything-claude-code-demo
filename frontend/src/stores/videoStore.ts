@@ -593,12 +593,14 @@ export const useVideoStore = defineStore('video', () => {
 
   /**
    * 从视频当前帧向后截取 x 秒,生成 GIF 并返回 Blob。
+   * @param params.size 可选 'small'(320p)/ 'medium'(480p)/ 'large'(720p),默认 medium
    * @returns { blob, actualDuration } actualDuration 是后端实际截到的时长(可能小于请求时长)
    */
   async function makeGif(params: {
     videoPath: string
     startTime: number
     duration: number
+    size?: 'small' | 'medium' | 'large'
   }): Promise<{ blob: Blob; actualDuration: number }> {
     const res = await fetch(`${API_BASE}/gif/make`, {
       method: 'POST',

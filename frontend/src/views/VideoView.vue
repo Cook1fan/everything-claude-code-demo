@@ -199,6 +199,25 @@
                         <span>3</span>
                         <span>8</span>
                       </div>
+
+                      <div class="text-xs text-slate-400 mt-3 mb-1">尺寸</div>
+                      <div class="flex gap-1 bg-slate-900/60 p-0.5 rounded-md">
+                        <button
+                          v-for="opt in GIF_SIZE_OPTIONS"
+                          :key="opt.key"
+                          type="button"
+                          @click="gifSize = opt.key"
+                          :class="[
+                            'flex-1 px-2 py-1 rounded text-xs font-medium transition-colors',
+                            gifSize === opt.key
+                              ? 'bg-amber-500 text-slate-900'
+                              : 'text-slate-300 hover:text-white'
+                          ]"
+                        >
+                          {{ opt.label }}<span class="opacity-70 ml-0.5">{{ opt.pixel }}</span>
+                        </button>
+                      </div>
+
                       <div class="flex items-center gap-2 mt-3">
                         <button
                           @click="confirmMakeGif"
@@ -363,6 +382,12 @@ const spriteGenerating = ref(false)
 const gifPopoverOpen = ref(false)
 const gifDuration = ref(3)
 const gifMaking = ref(false)
+const gifSize = ref<'small' | 'medium' | 'large'>('medium')
+const GIF_SIZE_OPTIONS = [
+  { key: 'small', label: '小', pixel: '320p' },
+  { key: 'medium', label: '中', pixel: '480p' },
+  { key: 'large', label: '大', pixel: '720p' },
+] as const
 const spriteInfo = ref<SpriteInfo | null>(null)
 const spriteImage = ref<HTMLImageElement | null>(null)
 const spriteLoaded = ref(false)
@@ -1009,6 +1034,7 @@ async function confirmMakeGif() {
       videoPath: video.value.videoPath,
       startTime,
       duration: gifDuration.value,
+      size: gifSize.value,
     })
 
     // 浏览器下载

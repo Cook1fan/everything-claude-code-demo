@@ -10,11 +10,22 @@ const { checkFFmpeg, getVideoDuration } = require('../../scanner/spriteGenerator
 const router = express.Router();
 
 const FPS = 12;
-const WIDTH = 480;
 const MIN_DURATION = 3;
 const MAX_DURATION = 8;
 const DEFAULT_DURATION = 3;
+const DEFAULT_SIZE = 'medium';
+const SIZE_PRESETS = {
+  small: 320,
+  medium: 480,
+  large: 720,
+};
 const TIMEOUT_MS = 60000;
+
+function parseSize(value) {
+  if (typeof value !== 'string') return DEFAULT_SIZE;
+  if (Object.prototype.hasOwnProperty.call(SIZE_PRESETS, value)) return value;
+  return DEFAULT_SIZE;
+}
 
 function resolveVideoPath(input) {
   if (typeof input !== 'string' || input.length === 0) return null;
@@ -53,31 +64,31 @@ function cleanupTempDir(dir) {
   }
 }
 
-function buildPaletteArgs(videoPath, start, duration, palettePath) {
+function buildPaletteArgs(videoPath, start, duration, width, palettePath) {
   return [
     '-y',
     '-ss', String(start),
     '-t', String(duration),
     '-i', videoPath,
-    '-vf', `fps=${FPS},scale=${WIDTH}:-1:flags=lanczos,palettegen`,
+    '-vf', `fps=${FPS},scale=${width}:-1:flags=lanczos,palettegen`,
     palettePath,
   ];
 }
 
-function buildGifArgs(videoPath, start, duration, palettePath, gifPath) {
+function buildGifArgs(videoPath, start, duration, width, palettePath, gifPath) {
   return [
     '-y',
     '-ss', String(start),
     '-t', String(duration),
     '-i', videoPath,
     '-i', palettePath,
-    '-filter_complex', `[0:v]fps=${FPS},scale=${WIDTH}:-1:flags=lanczos[x];[x][1:v]paletteuse`,
+    '-filter_complex', `[0:v]fps=${FPS},scale=${width}:-1:flags=lanczos[x];[x][1:v]paletteuse`,
     gifPath,
   ];
 }
 
 router.post('/make', async (req, res) => {
-  const { videoPath: rawPath, startTime: rawStart, duration: rawDuration } = req.body || {};
+  const { videoPath: rawPath, startTime: rawStart, duration: rawDuration, size: rawSize } = req.body || {};
 
   const resolvedPath = resolveVideoPath(rawPath);
   if (!resolvedPath) {
@@ -94,6 +105,8 @@ router.post('/make', async (req, res) => {
 
   const start = clampStart(rawStart);
   const requestedDuration = clampDuration(rawDuration);
+  const size = parseSize(rawSize);
+  const width = SIZE_PRESETS[size];
 
   let ffmpegStatus;
   try {
@@ -127,7 +140,7 @@ router.post('/make', async (req, res) => {
   res.on('close', () => cleanupTempDir(tempDir));
 
   // Pass 1: 生成调色板
-  execFile(ffmpegPath, buildPaletteArgs(resolvedPath, start, actualDuration, palettePath), { timeout: TIMEOUT_MS }, (paletteErr) => {
+  execFile(ffmpegPath, buildPaletteArgs(resolvedPath, start, actualDuration, width, palettePath), { timeout: TIMEOUT_MS }, (paletteErr) => {
     if (paletteErr) {
       cleanupTempDir(tempDir);
       if (!res.headersSent) {
@@ -137,7 +150,7 @@ router.post('/make', async (req, res) => {
     }
 
     // Pass 2: 生成 GIF
-    execFile(ffmpegPath, buildGifArgs(resolvedPath, start, actualDuration, palettePath, gifPath), { timeout: TIMEOUT_MS }, (gifErr) => {
+    execFile(ffmpegPath, buildGifArgs(resolvedPath, start, actualDuration, width, palettePath, gifPath), { timeout: TIMEOUT_MS }, (gifErr) => {
       if (gifErr) {
         cleanupTempDir(tempDir);
         if (!res.headersSent) {
