@@ -169,6 +169,53 @@
                   >
                     📸 提取帧
                   </button>
+                  <div class="relative">
+                    <button
+                      @click="gifPopoverOpen = !gifPopoverOpen"
+                      :disabled="gifMaking"
+                      class="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 disabled:bg-slate-600 disabled:cursor-not-allowed text-white rounded-md transition-colors font-medium text-sm"
+                      title="从当前帧向后制作 GIF"
+                    >
+                      {{ gifMaking ? '⏳ 制作中...' : '🎞️ 制作 GIF' }}
+                    </button>
+                    <div
+                      v-if="gifPopoverOpen"
+                      class="absolute z-20 mt-2 right-0 w-64 bg-slate-800 border border-slate-600 rounded-lg shadow-xl p-3"
+                      data-test="gif-popover"
+                    >
+                      <div class="flex items-center justify-between mb-2">
+                        <span class="text-sm text-slate-300">时长(秒)</span>
+                        <span class="text-sm text-amber-300 font-mono">{{ gifDuration }}s</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="3"
+                        max="8"
+                        step="1"
+                        v-model.number="gifDuration"
+                        class="w-full accent-amber-500"
+                      />
+                      <div class="flex justify-between text-xs text-slate-500 mt-1">
+                        <span>3</span>
+                        <span>8</span>
+                      </div>
+                      <div class="flex items-center gap-2 mt-3">
+                        <button
+                          @click="confirmMakeGif"
+                          :disabled="gifMaking"
+                          class="flex-1 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 disabled:bg-slate-600 text-white rounded-md text-sm font-medium"
+                        >
+                          {{ gifMaking ? '生成中...' : '开始制作' }}
+                        </button>
+                        <button
+                          @click="gifPopoverOpen = false"
+                          class="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded-md text-sm"
+                        >
+                          取消
+                        </button>
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
                 <!-- 评分 / 质量 -->
@@ -311,6 +358,11 @@ const videoRef = ref<HTMLVideoElement | null>(null)
 const playError = ref<string | null>(null)
 const ffmpegAvailable = ref<boolean | null>(null)
 const spriteGenerating = ref(false)
+
+// GIF 制作
+const gifPopoverOpen = ref(false)
+const gifDuration = ref(3)
+const gifMaking = ref(false)
 const spriteInfo = ref<SpriteInfo | null>(null)
 const spriteImage = ref<HTMLImageElement | null>(null)
 const spriteLoaded = ref(false)
@@ -947,6 +999,37 @@ watch(() => route.params.id, async (_newId, oldId) => {
     loadPlayer()
   }, 50)
 })
+
+async function confirmMakeGif() {
+  if (!video.value || !player) return
+  gifMaking.value = true
+  try {
+    const startTime = player.currentTime ?? 0
+    const { blob } = await store.makeGif({
+      videoPath: video.value.videoPath,
+      startTime,
+      duration: gifDuration.value,
+    })
+
+    // 浏览器下载
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    const safeTitle = (video.value.title || 'clip').replace(/[\\/:*?"<>|]/g, '_')
+    a.download = `${safeTitle}_${Math.floor(startTime)}s.gif`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+
+    gifPopoverOpen.value = false
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    alert('GIF 制作失败: ' + msg)
+  } finally {
+    gifMaking.value = false
+  }
+}
 
 onBeforeUnmount(() => {
   playHistory.stopSession()

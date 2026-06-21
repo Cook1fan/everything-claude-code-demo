@@ -591,6 +591,29 @@ export const useVideoStore = defineStore('video', () => {
     }
   }
 
+  /**
+   * 从视频当前帧向后截取 x 秒,生成 GIF 并返回 Blob。
+   * @returns { blob, actualDuration } actualDuration 是后端实际截到的时长(可能小于请求时长)
+   */
+  async function makeGif(params: {
+    videoPath: string
+    startTime: number
+    duration: number
+  }): Promise<{ blob: Blob; actualDuration: number }> {
+    const res = await fetch(`${API_BASE}/gif/make`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }))
+      throw new Error(err.error || `HTTP ${res.status}`)
+    }
+    const blob = await res.blob()
+    const actualDuration = parseFloat(res.headers.get('X-Actual-Duration') || '0')
+    return { blob, actualDuration }
+  }
+
   async function loadVideos() {
     loading.value = true
     try {
@@ -858,6 +881,7 @@ export const useVideoStore = defineStore('video', () => {
     prevPage,
     loadVideos,
     loadDeletionRecords,
+    makeGif,
     getScanStatus,
     startScan,
     getVideoUrl,
