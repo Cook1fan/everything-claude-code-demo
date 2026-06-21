@@ -7,6 +7,7 @@ const filesRouter = require('./routes/files');
 const spriteRouter = require('./routes/sprite');
 const frameExtractRouter = require('./routes/frameExtract');
 const deletionRecordsRouter = require('./routes/deletionRecords');
+const gifRouter = require('./routes/gif');
 
 const createApp = () => {
   const app = express();
@@ -22,6 +23,7 @@ const createApp = () => {
   app.use('/api/sprite', spriteRouter);
   app.use('/api/frame-extract', frameExtractRouter);
   app.use('/api/deletion-records', deletionRecordsRouter);
+  app.use('/api/gif', gifRouter);
 
   return app;
 };
