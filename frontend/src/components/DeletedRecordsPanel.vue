@@ -2,47 +2,56 @@
   <div
     v-if="visible"
     data-test="deletion-panel"
-    class="mx-6 mt-4"
+    class="mx-6 mt-4 mb-2"
   >
-    <!-- 可折叠头部 -->
-    <button
-      type="button"
-      data-test="panel-toggle"
-      class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 transition-colors"
-      @click="toggleExpand"
-      :aria-expanded="expanded"
-      aria-controls="deletion-records-list"
+    <div
+      class="rounded-md border border-amber-500/40 bg-amber-500/10 overflow-hidden"
+      style="box-shadow: 0 1px 2px rgba(0,0,0,0.1);"
     >
-      <span
-        aria-hidden="true"
-        class="inline-block text-[10px] transition-transform"
-        :class="{ 'rotate-90': expanded }"
-      >▶</span>
-      <span data-test="panel-count" class="text-slate-500">
-        {{ records.length }} 条已删除视频记录
-      </span>
-    </button>
-
-    <!-- 展开内容 -->
-    <ul
-      v-if="expanded"
-      id="deletion-records-list"
-      data-test="records-list"
-      class="mt-1 max-h-48 overflow-y-auto text-xs text-slate-500 space-y-0.5 pl-5"
-    >
-      <li
-        v-for="(record, idx) in records"
-        :key="idx"
-        class="flex items-baseline gap-2 leading-relaxed"
+      <!-- 可折叠头部 -->
+      <button
+        type="button"
+        data-test="panel-toggle"
+        class="w-full flex items-center gap-2 px-3 py-2 text-sm text-amber-200 hover:bg-amber-500/10 transition-colors"
+        @click="toggleExpand"
+        :aria-expanded="expanded"
+        aria-controls="deletion-records-list"
       >
-        <span class="text-slate-600 font-mono text-[10px] shrink-0">
-          {{ formatTimestamp(record.timestamp) }}
+        <span
+          aria-hidden="true"
+          class="inline-block text-[10px] transition-transform text-amber-400"
+          :class="{ 'rotate-90': expanded }"
+        >▶</span>
+        <span class="text-amber-400" aria-hidden="true">⚠</span>
+        <span data-test="panel-count" class="font-medium text-amber-200">
+          {{ records.length }} 条已删除视频记录
         </span>
-        <span class="text-slate-400 break-all">
-          {{ record.path }}
+        <span class="ml-auto text-xs text-amber-400/70">
+          {{ expanded ? '收起' : '展开' }}
         </span>
-      </li>
-    </ul>
+      </button>
+
+      <!-- 展开内容 -->
+      <ul
+        v-if="expanded"
+        id="deletion-records-list"
+        data-test="records-list"
+        class="max-h-40 overflow-y-auto text-xs border-t border-amber-500/30 bg-slate-900/40 px-3 py-1.5 space-y-0.5"
+      >
+        <li
+          v-for="(record, idx) in records"
+          :key="idx"
+          class="flex items-baseline gap-2 leading-relaxed py-0.5"
+        >
+          <span class="text-amber-400/70 font-mono text-[10px] shrink-0">
+            {{ formatTimestamp(record.timestamp) }}
+          </span>
+          <span class="text-slate-300 break-all">
+            {{ record.path }}
+          </span>
+        </li>
+      </ul>
+    </div>
   </div>
 </template>
 
