@@ -46,6 +46,7 @@ server.listen(PORT, () => {
   console.log(`  POST /api/frame-extract/start - 开始帧提取任务`);
   console.log(`  GET  /api/frame-extract/status - 获取所有任务状态`);
   console.log(`  GET  /api/frame-extract/status/:taskId - 获取单个任务状态`);
+  console.log(`  GET  /api/deletion-records - 获取目录删除记录`);
   console.log(`  POST /api/frame-extract/abort - 中止任务`);
   console.log(`  GET  /api/frame-extract/download/:taskId - 下载提取的帧 (ZIP)`);
   console.log(`  POST /api/frame-extract/clear-history - 清除历史任务`);
