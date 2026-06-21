@@ -2,7 +2,7 @@
   <div
     v-if="visible"
     data-test="deletion-panel"
-    style="margin-bottom: 16px; min-height: 60px; flex-shrink: 0; background-color: rgba(245, 158, 11, 0.2); border: 3px solid #f59e0b; border-radius: 8px; box-shadow: 0 10px 15px -3px rgba(245, 158, 11, 0.3); position: relative; z-index: 10;"
+    style="margin-bottom: 16px; min-height: 60px; flex-shrink: 0; background-color: rgba(245, 158, 11, 0.2); border: 3px solid #f59e0b; border-radius: 8px; box-shadow: 0 10px 15px -3px rgba(245, 158, 11, 0.3); position: sticky; top: 0; z-index: 10;"
   >
     <!-- 可折叠头部 -->
     <button
