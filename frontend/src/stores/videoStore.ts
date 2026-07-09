@@ -9,7 +9,7 @@ const frameTaskStatusMap = ref<Map<string, FrameExtractStatus>>(new Map())
 
 const API_BASE = '/api'
 
-export type SortMode = 'default' | 'random' | 'name' | 'date' | 'rating'
+export type SortMode = 'default' | 'random' | 'name' | 'date' | 'rating' | 'size'
 
 export const useVideoStore = defineStore('video', () => {
   const videos = ref<Video[]>([])
@@ -462,6 +462,9 @@ export const useVideoStore = defineStore('video', () => {
         break
       case 'date':
         result.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+        break
+      case 'size':
+        result.sort((a, b) => (b.fileSize || 0) - (a.fileSize || 0))
         break
       default:
         result.sort((a, b) => {

@@ -124,6 +124,7 @@
                 <option value="name">名称</option>
                 <option value="date">日期</option>
                 <option value="rating">星级</option>
+                <option value="size">大小</option>
               </select>
               <button
                 v-if="store.sortMode === 'random'"
